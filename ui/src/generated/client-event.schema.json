@@ -1,0 +1,523 @@
+{
+  "$defs": {
+    "Activate": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ActivatePayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "activate",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "Activate",
+      "type": "object"
+    },
+    "ActivatePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "wake_word",
+            "keyboard",
+            "ui",
+            "shortcut"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "source"
+      ],
+      "title": "ActivatePayload",
+      "type": "object"
+    },
+    "ApprovalDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalDecisionPayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "approval_decision",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "ApprovalDecision",
+      "type": "object"
+    },
+    "ApprovalDecisionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_id": {
+          "format": "uuid",
+          "title": "Approval Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "approval_id",
+        "decision"
+      ],
+      "title": "ApprovalDecisionPayload",
+      "type": "object"
+    },
+    "Interrupt": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/InterruptPayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "interrupt",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "Interrupt",
+      "type": "object"
+    },
+    "InterruptPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "user_speech",
+            "user_command",
+            "device_disconnect"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "reason"
+      ],
+      "title": "InterruptPayload",
+      "type": "object"
+    },
+    "ModeChange": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModeChangePayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "mode_change",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "ModeChange",
+      "type": "object"
+    },
+    "ModeChangePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "normal",
+            "private",
+            "meeting"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "mode"
+      ],
+      "title": "ModeChangePayload",
+      "type": "object"
+    },
+    "SubmitText": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/SubmitTextPayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "submit_text",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "SubmitText",
+      "type": "object"
+    },
+    "SubmitTextPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 32000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "device_id"
+      ],
+      "title": "SubmitTextPayload",
+      "type": "object"
+    },
+    "TransferDevice": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TransferDevicePayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "transfer_device",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "TransferDevice",
+      "type": "object"
+    },
+    "TransferDevicePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "from_device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "From Device Id",
+          "type": "string"
+        },
+        "to_device_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "To Device Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_device_id",
+        "to_device_id"
+      ],
+      "title": "TransferDevicePayload",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "activate": "#/$defs/Activate",
+      "approval_decision": "#/$defs/ApprovalDecision",
+      "interrupt": "#/$defs/Interrupt",
+      "mode_change": "#/$defs/ModeChange",
+      "submit_text": "#/$defs/SubmitText",
+      "transfer_device": "#/$defs/TransferDevice"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Activate"
+    },
+    {
+      "$ref": "#/$defs/SubmitText"
+    },
+    {
+      "$ref": "#/$defs/Interrupt"
+    },
+    {
+      "$ref": "#/$defs/ApprovalDecision"
+    },
+    {
+      "$ref": "#/$defs/TransferDevice"
+    },
+    {
+      "$ref": "#/$defs/ModeChange"
+    }
+  ],
+  "title": "ClientEvent"
+}

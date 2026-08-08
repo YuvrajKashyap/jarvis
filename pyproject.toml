@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yuvraj-jarvis"
+version = "0.1.0"
+description = "Private local-first AI control plane for Windows and iPhone"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "aiosqlite>=0.21,<1",
+  "alembic>=1.16,<2",
+  "apscheduler>=3.11,<4",
+  "asyncer>=0.0.8,<1",
+  "cryptography>=45,<47",
+  "fastapi>=0.128,<1",
+  "httpx>=0.28,<1",
+  "keyring>=25,<26",
+  "pillow>=12.1,<13",
+  "psutil>=7,<8",
+  "pydantic>=2.12,<3",
+  "pydantic-settings>=2.10,<3",
+  "sqlmodel>=0.0.27,<1",
+  "structlog>=25,<26",
+  "uvicorn[standard]>=0.40,<1",
+]
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.140,<7",
+  "httpx2>=2.9,<3",
+  "pip-audit>=2.9,<3",
+  "pyinstaller>=6.16,<7",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.2,<2",
+  "pytest-cov>=7,<8",
+  "ruff>=0.14,<1",
+  "ty>=0.0.8,<1",
+]
+
+[project.scripts]
+jarvis-core = "jarvis.bootstrap:main"
+
+[project.optional-dependencies]
+speech = [
+    "faster-whisper>=1.2.1",
+    "openwakeword>=0.6.0",
+    "silero-vad>=6.2.1",
+    "sounddevice>=0.5.5",
+]
+voice = [
+    "chatterbox-tts>=0.1.7",
+]
+
+[tool.fastapi]
+entrypoint = "jarvis.bootstrap:create_app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jarvis"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers --import-mode=importlib"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "integration: crosses a process or persistence seam",
+  "hardware: requires local hardware or an installed runtime",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["jarvis"]
+omit = [
+  "src/jarvis/__main__.py",
+  "src/jarvis/platform/migrations/env.py",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "S", "FAST", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S105", "S106"]
+
+[tool.ty.src]
+include = ["src", "tests", "scripts"]

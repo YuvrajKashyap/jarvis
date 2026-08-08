@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from jarvis.platform.protocol import client_event_schema, server_event_schema
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_DIRECTORY = ROOT / "ui" / "src" / "generated"
+
+
+def generate(*, check: bool) -> None:
+    schemas = {
+        "client-event": ("ClientEvent", client_event_schema()),
+        "server-event": ("ServerEvent", server_event_schema()),
+    }
+    expected: dict[Path, str] = {}
+    for stem, (title, schema) in schemas.items():
+        schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+        schema["title"] = title
+        expected[OUTPUT_DIRECTORY / f"{stem}.schema.json"] = (
+            json.dumps(schema, indent=2, sort_keys=True) + "\n"
+        )
+        expected[OUTPUT_DIRECTORY / f"{stem}.ts"] = _compile_typescript(schema)
+
+    expected[OUTPUT_DIRECTORY / "index.ts"] = (
+        'export type { ClientEvent } from "./client-event";\n'
+        'export type { ServerEvent } from "./server-event";\n'
+    )
+
+    stale = [path for path, content in expected.items() if _read(path) != content]
+    if check:
+        if stale:
+            names = ", ".join(str(path.relative_to(ROOT)) for path in stale)
+            raise SystemExit(f"generated protocol is stale: {names}")
+        return
+
+    OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    for path, content in expected.items():
+        path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def _compile_typescript(schema: dict[str, object]) -> str:
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        raise RuntimeError("pnpm is required to generate TypeScript protocol contracts")
+    with tempfile.TemporaryDirectory(prefix="jarvis-protocol-") as temporary_directory:
+        temporary = Path(temporary_directory)
+        schema_path = temporary / "schema.json"
+        output_path = temporary / "schema.ts"
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
+        result = subprocess.run(  # noqa: S603 - executable is resolved from the local PATH
+            [
+                pnpm,
+                "exec",
+                "json2ts",
+                "--input",
+                str(schema_path),
+                "--output",
+                str(output_path),
+                "--unknownAny",
+                "--no-enableConstEnums",
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"json2ts failed: {detail}")
+        return output_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def _read(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate TypeScript from Pydantic protocol models"
+    )
+    parser.add_argument("--check", action="store_true", help="fail when generated files differ")
+    arguments = parser.parse_args()
+    generate(check=arguments.check)
+
+
+if __name__ == "__main__":
+    main()
