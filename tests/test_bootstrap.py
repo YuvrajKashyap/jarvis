@@ -15,6 +15,7 @@ def test_composition_root_creates_local_state_without_external_connections(tmp_p
         allowed_hosts=("127.0.0.1", "localhost"),
         allowed_origins=("http://127.0.0.1:1420",),
         desktop_speech_enabled=False,
+        model_prewarm_enabled=False,
     )
     secrets = InMemorySecretStore()
 
@@ -32,6 +33,7 @@ def test_composition_root_creates_local_state_without_external_connections(tmp_p
         "files.read_text",
         "files.write_text",
         "files.undo",
+        "terminal.execute",
     ]
     assert application.state.actions is not None
 
@@ -42,6 +44,7 @@ def test_composition_root_reuses_api_secret_across_restarts(tmp_path: Path) -> N
         memory_directory=tmp_path / "memory",
         file_roots=(tmp_path,),
         desktop_speech_enabled=False,
+        model_prewarm_enabled=False,
     )
     secrets = InMemorySecretStore()
 
@@ -62,6 +65,7 @@ def test_composition_root_adds_configured_tailnet_origin_for_phone_pairing(
         file_roots=(tmp_path,),
         phone_base_url="https://yuvraj-omen.example.ts.net",
         desktop_speech_enabled=False,
+        model_prewarm_enabled=False,
     )
     secrets = InMemorySecretStore()
     app = build_application(settings=settings, secrets=secrets)
@@ -74,3 +78,11 @@ def test_composition_root_adds_configured_tailnet_origin_for_phone_pairing(
 
     assert response.status_code == 201
     assert response.json()["pairing_url"].startswith("https://yuvraj-omen.example.ts.net/#pair=")
+
+
+def test_default_runtime_keeps_the_measured_primary_model_resident() -> None:
+    settings = BootstrapSettings()
+
+    assert settings.primary_model == "qwen3.5:4b-q4_K_M"
+    assert settings.model_context_length == 4_096
+    assert settings.model_prewarm_enabled is True

@@ -20,6 +20,7 @@ from jarvis.agency.capabilities import (
 from jarvis.agency.files import ReadTextCapability, UndoFileCapability, WriteTextCapability
 from jarvis.agency.observation import ActiveWindowCapability, SystemHealthCapability
 from jarvis.agency.policy import PolicyEngine
+from jarvis.agency.terminal import TerminalCommandCapability
 from jarvis.memory.history import ConversationHistoryRepository
 from jarvis.memory.store import MemoryRepository
 from jarvis.perception.context import PerceptionCoordinator
@@ -30,6 +31,7 @@ from jarvis.platform.memory_context import LocalMemoryContext
 from jarvis.platform.ollama import OllamaProvider
 from jarvis.platform.pairing import PhonePairing
 from jarvis.platform.pairing_sqlite import SQLitePairingStore
+from jarvis.platform.process import LocalCommandRunner
 from jarvis.platform.resources import WindowsResourceProbe
 from jarvis.platform.speech import (
     FasterWhisperTranscriber,
@@ -42,6 +44,7 @@ from jarvis.platform.voice import ChatterboxTurboSynthesizer, SoundDeviceSpeaker
 from jarvis.platform.windows import WindowsPerception
 from jarvis.runtime.assistant import AssistantSettings, AssistantTurn
 from jarvis.runtime.conversation import RuntimeCoordinator
+from jarvis.runtime.lifecycle import RuntimeLifecycle
 from jarvis.runtime.resources import ResourceGovernor, ResourceLimits
 from jarvis.speech.audio import AudioFormat, AudioRingBuffer
 from jarvis.speech.desktop import DesktopSpeechService
@@ -117,8 +120,9 @@ class BootstrapSettings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = Field(default=7331, ge=1024, le=65_535)
     desktop_session_token: str | None = Field(default=None, min_length=32, max_length=512)
-    primary_model: str = Field(default="qwen3.5:4b-q8_0", min_length=1, max_length=160)
+    primary_model: str = Field(default="qwen3.5:4b-q4_K_M", min_length=1, max_length=160)
     model_context_length: int = Field(default=4_096, ge=512, le=8_192)
+    model_prewarm_enabled: bool = True
     whisper_model: str = Field(default_factory=_default_whisper_model, min_length=1, max_length=512)
     desktop_speech_enabled: bool = True
     voice_reference_path: Path | None = None
@@ -191,6 +195,11 @@ def build_application(
     capabilities.register(ReadTextCapability(files))
     capabilities.register(WriteTextCapability(files))
     capabilities.register(UndoFileCapability(files))
+    terminal = LocalCommandRunner.from_path(
+        roots=settings.file_roots,
+        names=("git", "pnpm", "uv", "cargo", "rg"),
+    )
+    capabilities.register(TerminalCommandCapability(terminal))
     policy = PolicyEngine(SQLiteApprovalStore(sqlite))
     action_engine = InvocationEngine(registry=capabilities, policy=policy, audit=sqlite)
     actions = InvocationCoordinator(engine=action_engine, policy=policy)
@@ -199,6 +208,11 @@ def build_application(
         models=model,
         probe=WindowsResourceProbe(),
         limits=ResourceLimits(),
+    )
+    lifecycle = RuntimeLifecycle(
+        models=resources if settings.model_prewarm_enabled else None,
+        primary_model=settings.primary_model if settings.model_prewarm_enabled else None,
+        closeables=(sqlite,),
     )
     assistant = AssistantTurn(
         model=model,
@@ -283,6 +297,7 @@ def build_application(
         history=history,
         speech_output=speech_output,
         memory=memory,
+        lifecycle=lifecycle,
     )
     application.state.runtime = runtime
     application.state.sqlite = sqlite
@@ -291,11 +306,13 @@ def build_application(
     application.state.perception = perception
     application.state.capabilities = capabilities
     application.state.files = files
+    application.state.terminal = terminal
     application.state.policy = policy
     application.state.actions = actions
     application.state.phone_pairing = phone_pairing
     application.state.model = model
     application.state.resources = resources
+    application.state.lifecycle = lifecycle
     application.state.assistant = assistant
     application.state.speech_input = speech_input
     application.state.desktop_speech = desktop_speech

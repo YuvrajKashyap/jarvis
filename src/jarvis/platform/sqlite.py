@@ -137,6 +137,10 @@ class SQLiteStore:
             busy_timeout_ms=busy_timeout_ms,
         )
 
+    def close(self) -> None:
+        with self._write_lock:
+            self.engine.dispose()
+
     def create_backup(
         self,
         directory: Path,

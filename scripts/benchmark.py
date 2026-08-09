@@ -15,10 +15,10 @@ from pydantic import BaseModel, ConfigDict
 ROOT = Path(__file__).resolve().parents[1]
 OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODELS = (
-    "qwen3.5:9b-q4_K_M",
+    "qwen3.5:4b-q4_K_M",
     "qwen3.5:4b-q8_0",
+    "gemma3:4b-it-qat",
     "ministral-3:8b-instruct-2512-q4_K_M",
-    "gemma3:12b-it-qat",
 )
 MINIMUM_AVAILABLE_MEMORY_BYTES = 2 * 1024**3
 
@@ -35,6 +35,7 @@ class PromptResult(BaseModel):
     response: str
     thinking_characters: int
     tool_call_name: str | None = None
+    error: str | None = None
     passed: bool
 
 
@@ -144,7 +145,28 @@ def run_prompt(
     tool_call_name: str | None = None
     final: dict[str, Any] = {}
     with client.stream("POST", "/api/chat", json=payload, timeout=300) as response:
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            response.read()
+            try:
+                detail = response.json().get("error")
+            except (json.JSONDecodeError, AttributeError):
+                detail = None
+            total_ms = (time.perf_counter() - started) * 1_000
+            return PromptResult(
+                name=name,
+                context_tokens=context_tokens,
+                first_event_ms=total_ms,
+                first_content_ms=None,
+                total_ms=total_ms,
+                tokens_per_second=None,
+                response="",
+                thinking_characters=0,
+                tool_call_name=None,
+                error=str(detail or f"Ollama returned HTTP {response.status_code}")[:500],
+                passed=False,
+            )
         for line in response.iter_lines():
             if not line:
                 continue

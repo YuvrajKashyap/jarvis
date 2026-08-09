@@ -91,6 +91,22 @@ class FakeDesktopSpeech:
         self.events.put(event)
 
 
+class FailingStopDesktopSpeech(FakeDesktopSpeech):
+    async def stop(self) -> None:
+        raise RuntimeError("microphone shutdown failed")
+
+
+class FakeLifecycle:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    async def start(self) -> None:
+        self.events.append("start")
+
+    async def stop(self) -> None:
+        self.events.append("stop")
+
+
 APPROVAL_ID = UUID("019fd977-1d96-7892-950c-6afbb71f7cfa")
 ACTION_ID = UUID("019fd977-1d96-7892-950c-6afbb71f7cfb")
 
@@ -876,6 +892,47 @@ def test_background_desktop_wake_opens_a_turn_and_transcribes_without_ui_input()
     assert speech.stopped is True
     assert activated["payload"]["state"] == "listening"
     assert streamed[1]["type"] == "transcript"
+
+
+def test_application_lifespan_prepares_and_releases_resident_runtime() -> None:
+    lifecycle = FakeLifecycle()
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        lifecycle=lifecycle,
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+
+    with TestClient(app):
+        assert lifecycle.events == ["start"]
+
+    assert lifecycle.events == ["start", "stop"]
+
+
+def test_application_lifespan_releases_runtime_when_speech_shutdown_fails() -> None:
+    lifecycle = FakeLifecycle()
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        lifecycle=lifecycle,
+        desktop_speech=FailingStopDesktopSpeech(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+
+    with pytest.raises(RuntimeError, match="microphone shutdown failed"), TestClient(app):
+        pass
+
+    assert lifecycle.events == ["start", "stop"]
 
 
 def client_event(event_type: str, payload: dict[str, object], sequence: int) -> dict[str, object]:

@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -21,6 +22,18 @@ from jarvis.platform.sqlite import (
     SQLiteApprovalStore,
     SQLiteStore,
 )
+
+
+def test_store_close_releases_database_file(tmp_path: Path) -> None:
+    database_path = tmp_path / "jarvis.db"
+    store = SQLiteStore(database_path)
+    store.initialize()
+
+    store.close()
+    database_path.unlink()
+
+    assert database_path.exists() is False
+
 
 NOW = datetime(2026, 8, 7, 18, 30, tzinfo=UTC)
 SESSION_ID = UUID("019fd977-1d96-7892-950c-6afbb71f7cf0")

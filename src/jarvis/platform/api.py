@@ -75,6 +75,7 @@ from jarvis.runtime.assistant import (
     TurnComplete,
 )
 from jarvis.runtime.conversation import ListeningMode, RuntimeCoordinator, RuntimeSnapshot
+from jarvis.runtime.lifecycle import ApplicationLifecycle
 from jarvis.speech.desktop import (
     DesktopBargeIn,
     DesktopSpeechError,
@@ -240,10 +241,15 @@ def create_app(
     history: ConversationHistory | None = None,
     speech_output: SpeechOutputFactory | None = None,
     memory: MemoryAdministration | None = None,
+    lifecycle: ApplicationLifecycle | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        lifecycle_started = False
         speech_started = False
+        if lifecycle is not None:
+            await lifecycle.start()
+            lifecycle_started = True
         if desktop_speech is not None:
             try:
                 await desktop_speech.start()
@@ -253,8 +259,12 @@ def create_app(
         try:
             yield
         finally:
-            if speech_started and desktop_speech is not None:
-                await desktop_speech.stop()
+            try:
+                if speech_started and desktop_speech is not None:
+                    await desktop_speech.stop()
+            finally:
+                if lifecycle_started and lifecycle is not None:
+                    await lifecycle.stop()
 
     app = FastAPI(
         title="JARVIS local control plane",
