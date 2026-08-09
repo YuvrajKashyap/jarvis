@@ -20,6 +20,25 @@ class FakeCloseable:
         self._events.append("close:sqlite")
 
 
+class FakeAsyncCloseable:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    async def close(self) -> None:
+        self._events.append("close:browser")
+
+
+class FakeComponent:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    async def start(self) -> None:
+        self._events.append("start:scheduler")
+
+    async def stop(self) -> None:
+        self._events.append("stop:scheduler")
+
+
 class FailingResidency(FakeResidency):
     async def ensure_resident(self, model: str) -> None:
         self.events.append(f"load:{model}")
@@ -69,6 +88,45 @@ async def test_runtime_lifecycle_releases_local_stores_after_model() -> None:
         "load:qwen3.5:4b-q4_K_M",
         "unload",
         "close:sqlite",
+    ]
+
+
+async def test_runtime_lifecycle_releases_async_resources_before_local_stores() -> None:
+    residency = FakeResidency()
+    lifecycle = RuntimeLifecycle(
+        models=residency,
+        primary_model="qwen3.5:4b-q4_K_M",
+        async_closeables=(FakeAsyncCloseable(residency.events),),
+        closeables=(FakeCloseable(residency.events),),
+    )
+
+    await lifecycle.start()
+    await lifecycle.stop()
+
+    assert residency.events == [
+        "load:qwen3.5:4b-q4_K_M",
+        "unload",
+        "close:browser",
+        "close:sqlite",
+    ]
+
+
+async def test_runtime_lifecycle_starts_and_stops_managed_components() -> None:
+    residency = FakeResidency()
+    lifecycle = RuntimeLifecycle(
+        models=residency,
+        primary_model="qwen3.5:4b-q4_K_M",
+        components=(FakeComponent(residency.events),),
+    )
+
+    await lifecycle.start()
+    await lifecycle.stop()
+
+    assert residency.events == [
+        "load:qwen3.5:4b-q4_K_M",
+        "start:scheduler",
+        "stop:scheduler",
+        "unload",
     ]
 
 

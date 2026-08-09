@@ -1,10 +1,14 @@
 import asyncio
 import json
-from typing import Literal
+from typing import Literal, Protocol
 
 from jarvis.memory.history import ConversationHistory, ConversationRole
-from jarvis.memory.store import MemoryRepository
+from jarvis.memory.store import MemoryFact
 from jarvis.platform.models import ChatMessage
+
+
+class MemorySearch(Protocol):
+    def search(self, query: str, *, limit: int = 12) -> list[MemoryFact]: ...
 
 
 class LocalMemoryContext:
@@ -14,7 +18,7 @@ class LocalMemoryContext:
         self,
         *,
         history: ConversationHistory,
-        memory: MemoryRepository,
+        memory: MemorySearch,
         recent_message_limit: int = 12,
         fact_limit: int = 6,
         character_budget: int = 24_000,

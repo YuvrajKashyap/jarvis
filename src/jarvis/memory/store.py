@@ -198,6 +198,15 @@ class MemoryRepository:
             row = session.get(MemoryFactRow, str(fact_id))
             return None if row is None else _fact_from_row(row)
 
+    def list_all(self, *, limit: int = 10_000) -> list[MemoryFact]:
+        if limit < 1 or limit > 10_000:
+            raise ValueError("memory list limit must be between 1 and 10000")
+        with Session(self._sqlite.engine) as session:
+            rows = session.exec(
+                select(MemoryFactRow).order_by(col(MemoryFactRow.updated_at).desc()).limit(limit)
+            ).all()
+            return [_fact_from_row(row) for row in rows]
+
     def list_conflicts(self) -> list[MemoryConflict]:
         with Session(self._sqlite.engine) as session:
             rows = session.exec(

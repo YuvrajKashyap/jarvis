@@ -1,9 +1,10 @@
+import asyncio
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from typing import Annotated, Literal
-from uuid import UUID
+from typing import Annotated, Literal, Protocol
+from uuid import UUID, uuid4
 
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -21,6 +22,15 @@ from pydantic import (
 from sqlmodel import Field as SqlField
 from sqlmodel import Session, SQLModel, col, select
 
+from jarvis.agency.capabilities import (
+    CapabilityContext,
+    CapabilityMetadata,
+    CapabilityRegistry,
+    CoordinatedExecution,
+    ExecutionResult,
+    ExecutionStatus,
+)
+from jarvis.agency.policy import RiskClass
 from jarvis.platform.sqlite import SQLiteStore
 
 
@@ -76,6 +86,23 @@ class ScheduledCapability(BaseModel):
     @classmethod
     def require_timezone(cls, value: datetime) -> datetime:
         return _require_aware(value)
+
+
+class CreateSchedule(TriggerValue):
+    name: str = Field(min_length=1, max_length=240)
+    capability: str = Field(min_length=3, max_length=160, pattern=r"^[a-z][a-z0-9_.-]+$")
+    arguments: dict[str, JsonValue]
+    trigger: Trigger
+
+
+class ScheduleMutation(TriggerValue):
+    schedule_id: UUID
+    removed: bool = False
+    undo_reference: str = Field(min_length=36, max_length=36)
+
+
+class UndoScheduleCreation(TriggerValue):
+    schedule_id: UUID
 
 
 class ScheduledCapabilityRow(SQLModel, table=True):
@@ -193,6 +220,276 @@ class DurableScheduler:
         schedule = self._repository.get(schedule_id)
         if schedule is not None and schedule.enabled:
             self._dispatch_callback(schedule)
+
+
+class ScheduledExecutionEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schedule_id: UUID
+    schedule_name: str = Field(min_length=1, max_length=240)
+    capability: str = Field(min_length=3, max_length=160)
+    occurred_at: datetime
+    execution: CoordinatedExecution
+
+    @field_validator("occurred_at")
+    @classmethod
+    def require_event_timezone(cls, value: datetime) -> datetime:
+        return _require_aware(value)
+
+
+class ScheduleControl(Protocol):
+    def start(self) -> None: ...
+
+    def shutdown(self) -> None: ...
+
+
+class ScheduledActionCoordinator(Protocol):
+    async def propose(
+        self,
+        *,
+        capability: str,
+        arguments: dict[str, JsonValue],
+        device_id: str,
+        requested_at: datetime,
+        direct_request: bool,
+        standing_rule_id: str | None = None,
+        scheduled: bool = False,
+    ) -> CoordinatedExecution: ...
+
+
+class ScheduledInvocationRuntime:
+    """Bridges APScheduler's worker thread into bounded async capability execution."""
+
+    def __init__(
+        self,
+        *,
+        repository: ScheduleRepository,
+        actions: ScheduledActionCoordinator,
+        maximum_in_flight: int = 4,
+        event_buffer_size: int = 64,
+    ) -> None:
+        if maximum_in_flight < 1:
+            raise ValueError("maximum_in_flight must be positive")
+        if event_buffer_size < 1:
+            raise ValueError("event_buffer_size must be positive")
+        self._actions = actions
+        self._scheduler: ScheduleControl = DurableScheduler(
+            repository=repository,
+            dispatch=self.dispatch,
+        )
+        self._maximum_in_flight = maximum_in_flight
+        self._events: asyncio.Queue[ScheduledExecutionEvent] = asyncio.Queue(
+            maxsize=event_buffer_size
+        )
+        self._event_buffer_size = event_buffer_size
+        self._subscribers: set[asyncio.Queue[ScheduledExecutionEvent]] = set()
+        self._pending_approvals: dict[UUID, ScheduledExecutionEvent] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def start(self) -> None:
+        if self._loop is not None:
+            return
+        self._loop = asyncio.get_running_loop()
+        try:
+            await asyncio.to_thread(self._scheduler.start)
+        except BaseException:
+            self._loop = None
+            raise
+
+    async def stop(self) -> None:
+        if self._loop is None:
+            return
+        await asyncio.to_thread(self._scheduler.shutdown)
+        self._loop = None
+        tasks = tuple(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def dispatch(self, schedule: ScheduledCapability) -> None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        loop.call_soon_threadsafe(self._accept, schedule)
+
+    async def next_event(self) -> ScheduledExecutionEvent:
+        return await self._events.get()
+
+    async def subscribe(self) -> AsyncIterator[ScheduledExecutionEvent]:
+        events: asyncio.Queue[ScheduledExecutionEvent] = asyncio.Queue(
+            maxsize=self._event_buffer_size
+        )
+        self._subscribers.add(events)
+        for event in self._pending_approvals.values():
+            if not events.full():
+                events.put_nowait(event)
+        try:
+            while True:
+                yield await events.get()
+        finally:
+            self._subscribers.discard(events)
+
+    def resolve(self, approval_id: UUID) -> None:
+        self._pending_approvals.pop(approval_id, None)
+
+    def put(self, schedule: ScheduledCapability) -> None:
+        scheduler = self._scheduler
+        if not isinstance(scheduler, DurableScheduler):
+            raise RuntimeError("schedule persistence is unavailable")
+        scheduler.put(schedule)
+
+    def remove(self, schedule_id: UUID) -> None:
+        scheduler = self._scheduler
+        if not isinstance(scheduler, DurableScheduler):
+            raise RuntimeError("schedule persistence is unavailable")
+        scheduler.remove(schedule_id)
+
+    def active_schedule_ids(self) -> set[UUID]:
+        scheduler = self._scheduler
+        if not isinstance(scheduler, DurableScheduler):
+            return set()
+        return scheduler.active_schedule_ids()
+
+    def _accept(self, schedule: ScheduledCapability) -> None:
+        if len(self._tasks) >= self._maximum_in_flight:
+            self._broadcast(
+                ScheduledExecutionEvent(
+                    schedule_id=schedule.schedule_id,
+                    schedule_name=schedule.name,
+                    capability=schedule.capability,
+                    occurred_at=datetime.now(UTC),
+                    execution=CoordinatedExecution(
+                        result=ExecutionResult(
+                            invocation_id=uuid4(),
+                            status=ExecutionStatus.FAILED,
+                            reason="scheduler_capacity",
+                        )
+                    ),
+                )
+            )
+            return
+        task = asyncio.create_task(
+            self._execute(schedule),
+            name=f"jarvis-schedule-{schedule.schedule_id}",
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _execute(self, schedule: ScheduledCapability) -> None:
+        occurred_at = datetime.now(UTC)
+        execution = await self._actions.propose(
+            capability=schedule.capability,
+            arguments=schedule.arguments,
+            device_id="scheduler",
+            requested_at=occurred_at,
+            direct_request=False,
+            standing_rule_id=schedule.standing_rule_id,
+            scheduled=True,
+        )
+        event = ScheduledExecutionEvent(
+            schedule_id=schedule.schedule_id,
+            schedule_name=schedule.name,
+            capability=schedule.capability,
+            occurred_at=occurred_at,
+            execution=execution,
+        )
+        self._broadcast(event)
+
+    def _broadcast(self, event: ScheduledExecutionEvent) -> None:
+        if event.execution.approval is not None:
+            self._pending_approvals[event.execution.approval.approval_id] = event
+        self._publish(self._events, event)
+        for subscriber in tuple(self._subscribers):
+            self._publish(subscriber, event)
+
+    @staticmethod
+    def _publish(
+        events: asyncio.Queue[ScheduledExecutionEvent],
+        event: ScheduledExecutionEvent,
+    ) -> None:
+        if events.full():
+            events.get_nowait()
+        events.put_nowait(event)
+
+
+class CreateScheduleCapability:
+    metadata = CapabilityMetadata(
+        name="schedules.create",
+        description=(
+            "Create one durable schedule for a validated JARVIS capability; external actions "
+            "still require approval when they run"
+        ),
+        risk=RiskClass.LOCAL_REVERSIBLE,
+        timeout_seconds=5,
+        reversible=True,
+    )
+    input_model = CreateSchedule
+    output_model = ScheduleMutation
+
+    def __init__(
+        self,
+        *,
+        scheduler: ScheduledInvocationRuntime,
+        registry: CapabilityRegistry,
+    ) -> None:
+        self._scheduler = scheduler
+        self._registry = registry
+
+    async def execute(self, arguments: BaseModel, context: CapabilityContext) -> ScheduleMutation:
+        request = CreateSchedule.model_validate(arguments)
+        target = self._registry.get(request.capability)
+        if target is None or request.capability.startswith("schedules."):
+            raise ValueError("scheduled capability is unavailable")
+        if target.metadata.risk is RiskClass.FORBIDDEN:
+            raise ValueError("forbidden capabilities cannot be scheduled")
+        target.input_model.model_validate(request.arguments)
+        schedule_id = UUID(bytes=context.invocation_id.bytes)
+        standing_rule_id = (
+            f"schedule:{schedule_id}"
+            if target.metadata.risk is RiskClass.LOCAL_REVERSIBLE
+            else None
+        )
+        schedule = ScheduledCapability(
+            schedule_id=schedule_id,
+            name=request.name,
+            capability=request.capability,
+            arguments=request.arguments,
+            trigger=request.trigger,
+            standing_rule_id=standing_rule_id,
+            enabled=True,
+            created_at=context.requested_at,
+        )
+        await asyncio.to_thread(self._scheduler.put, schedule)
+        return ScheduleMutation(
+            schedule_id=schedule_id,
+            undo_reference=str(schedule_id),
+        )
+
+
+class UndoScheduleCreationCapability:
+    metadata = CapabilityMetadata(
+        name="schedules.undo_create",
+        description="Remove the exact durable schedule created by a previous JARVIS action",
+        risk=RiskClass.LOCAL_REVERSIBLE,
+        timeout_seconds=5,
+        reversible=True,
+    )
+    input_model = UndoScheduleCreation
+    output_model = ScheduleMutation
+
+    def __init__(self, *, scheduler: ScheduledInvocationRuntime) -> None:
+        self._scheduler = scheduler
+
+    async def execute(self, arguments: BaseModel, context: CapabilityContext) -> ScheduleMutation:
+        request = UndoScheduleCreation.model_validate(arguments)
+        await asyncio.to_thread(self._scheduler.remove, request.schedule_id)
+        return ScheduleMutation(
+            schedule_id=request.schedule_id,
+            removed=True,
+            undo_reference=str(request.schedule_id),
+        )
 
 
 def _aps_trigger(trigger: TriggerValue) -> object:

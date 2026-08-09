@@ -113,6 +113,8 @@ class ActionCoordinator(Protocol):
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        standing_rule_id: str | None = None,
+        scheduled: bool = False,
     ) -> CoordinatedExecution: ...
 
     async def decide(
@@ -126,11 +128,14 @@ class ActionCoordinator(Protocol):
 
     def pending_capability(self, approval_id: UUID) -> str | None: ...
 
+    def pending_is_scheduled(self, approval_id: UUID) -> bool: ...
+
 
 @dataclass(frozen=True)
 class _PendingInvocation:
     invocation: Invocation
     device_id: str
+    scheduled: bool
 
 
 class CapabilityRegistry:
@@ -331,6 +336,10 @@ class InvocationCoordinator:
         pending = self._pending.get(approval_id)
         return pending.invocation.capability if pending is not None else None
 
+    def pending_is_scheduled(self, approval_id: UUID) -> bool:
+        pending = self._pending.get(approval_id)
+        return pending.scheduled if pending is not None else False
+
     async def propose(
         self,
         *,
@@ -339,6 +348,8 @@ class InvocationCoordinator:
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        standing_rule_id: str | None = None,
+        scheduled: bool = False,
     ) -> CoordinatedExecution:
         invocation = Invocation(
             invocation_id=uuid4(),
@@ -348,7 +359,11 @@ class InvocationCoordinator:
         )
         result = await self._engine.invoke(
             invocation,
-            authorization=AuthorizationContext(direct_request=direct_request),
+            authorization=AuthorizationContext(
+                direct_request=direct_request,
+                standing_rule_id=standing_rule_id,
+                scheduled=scheduled,
+            ),
             device_id=device_id,
             now=requested_at,
         )
@@ -374,6 +389,7 @@ class InvocationCoordinator:
         self._pending[prompt.approval_id] = _PendingInvocation(
             invocation=invocation,
             device_id=device_id,
+            scheduled=scheduled,
         )
         return CoordinatedExecution(result=result, approval=prompt)
 
@@ -388,7 +404,7 @@ class InvocationCoordinator:
         pending = self._pending.get(approval_id)
         if pending is None:
             raise LookupError("pending approval not found")
-        if pending.device_id != device_id:
+        if not pending.scheduled and pending.device_id != device_id:
             raise PermissionError("approval belongs to the requesting device")
 
         self._policy.record_decision(
@@ -401,7 +417,7 @@ class InvocationCoordinator:
             return await self._engine.invoke(
                 pending.invocation,
                 authorization=AuthorizationContext(approval_id=approval_id),
-                device_id=device_id,
+                device_id=pending.device_id,
                 now=now,
             )
         finally:

@@ -18,6 +18,10 @@ class Closeable(Protocol):
     def close(self) -> None: ...
 
 
+class AsyncCloseable(Protocol):
+    async def close(self) -> None: ...
+
+
 class RuntimeLifecycle:
     """Owns startup and shutdown of resources that must remain resident."""
 
@@ -26,12 +30,17 @@ class RuntimeLifecycle:
         *,
         models: ModelResidency | None,
         primary_model: str | None,
+        components: tuple[ApplicationLifecycle, ...] = (),
+        async_closeables: tuple[AsyncCloseable, ...] = (),
         closeables: tuple[Closeable, ...] = (),
     ) -> None:
         if (models is None) != (primary_model is None):
             raise ValueError("model residency and primary model must be configured together")
         self._models = models
         self._primary_model = primary_model
+        self._components = components
+        self._active_components: list[ApplicationLifecycle] = []
+        self._async_closeables = async_closeables
         self._closeables = closeables
         self._lock = asyncio.Lock()
         self._started = False
@@ -46,6 +55,13 @@ class RuntimeLifecycle:
                 except BaseException:
                     await self._release()
                     raise
+            try:
+                for component in self._components:
+                    await component.start()
+                    self._active_components.append(component)
+            except BaseException:
+                await self._release()
+                raise
             self._started = True
 
     async def stop(self) -> None:
@@ -56,9 +72,27 @@ class RuntimeLifecycle:
             await self._release()
 
     async def _release(self) -> None:
-        try:
-            if self._models is not None:
+        failure: BaseException | None = None
+        for component in reversed(self._active_components):
+            try:
+                await component.stop()
+            except BaseException as error:
+                failure = failure or error
+        self._active_components.clear()
+        if self._models is not None:
+            try:
                 await self._models.unload()
-        finally:
-            for closeable in self._closeables:
+            except BaseException as error:
+                failure = failure or error
+        for closeable in self._async_closeables:
+            try:
+                await closeable.close()
+            except BaseException as error:
+                failure = failure or error
+        for closeable in self._closeables:
+            try:
                 await asyncio.to_thread(closeable.close)
+            except BaseException as error:
+                failure = failure or error
+        if failure is not None:
+            raise failure

@@ -14,8 +14,11 @@ flowchart LR
   Runtime --> Agency["Agency"]
   Runtime --> Perception["Perception"]
   Agency --> Policy["Deterministic policy"]
+  Agency --> Scheduler["Durable schedules + live approvals"]
+  Agency --> Browser["Managed Playwright browser"]
   Intelligence --> Ollama["Ollama"]
-  Memory --> SQLite["SQLite + Markdown"]
+  Memory --> SQLite["SQLite + Markdown + FTS5"]
+  Memory --> Embeddings["CPU-local BGE embeddings"]
 ```
 
 ## Module ownership
@@ -28,6 +31,13 @@ flowchart LR
 - `platform` owns transport and replaceable vendor/OS adapters. It contains no product decisions.
 - `bootstrap.py` is the sole composition root. Product modules accept dependencies and never construct vendor implementations internally.
 
+## Implemented control paths
+
+- Browser observation and operation use a JARVIS-owned persistent Edge profile. Model-facing targets are restricted to accessibility roles, labels, placeholders, and visible text; arbitrary selectors and page-script execution are not exposed.
+- Durable APScheduler jobs are reconstructed from validated SQLite records. Each run re-enters the capability coordinator and policy engine. External actions produce a fresh approval that is broadcast to authenticated live clients and replayed after reconnection until resolved.
+- Memory retrieval fuses SQLite FTS5 results with CPU-local BGE-small embeddings. Embedding rows contain no canonical facts, can be deleted and rebuilt, and fall back to lexical retrieval if the embedding runtime is unavailable.
+- The Python core, browser, scheduler, model residency, and SQLite store share one ordered application lifecycle so startup rollback and shutdown do not strand background work.
+
 ## Dependency direction
 
 `runtime` coordinates module interfaces. Product modules may depend on protocol value types, but never on FastAPI, Ollama, SQLModel, Tailscale, Playwright, Windows UI Automation, or Tauri. Those dependencies point inward through adapters assembled in `bootstrap.py`.
@@ -36,7 +46,7 @@ The React client consumes generated protocol types. It never defines a competing
 
 ## Persistence
 
-SQLite is the transactional system of record, configured with foreign keys, WAL mode, bounded busy timeouts, crash-safe transactions, and one application writer. Human-editable durable knowledge is mirrored to Markdown. FTS and embeddings are derived, versioned, and rebuildable. Secrets live only in Windows Credential Manager.
+SQLite is the transactional system of record, configured with foreign keys, WAL mode, bounded busy timeouts, crash-safe transactions, and one application writer. Human-editable durable knowledge is mirrored to Markdown. FTS and embeddings are derived, versioned, and rebuildable. Embedding model weights live in JARVIS-managed application data rather than the repository or installer. Secrets live only in Windows Credential Manager.
 
 ## Authorization invariant
 

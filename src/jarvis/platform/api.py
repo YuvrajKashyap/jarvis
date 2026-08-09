@@ -35,6 +35,7 @@ from jarvis.agency.capabilities import (
     ExecutionStatus,
 )
 from jarvis.agency.policy import ApprovalChoice
+from jarvis.agency.scheduler import ScheduledExecutionEvent
 from jarvis.memory.history import (
     ConversationHistory,
     ConversationMessage,
@@ -174,6 +175,12 @@ class MemoryAdministration(Protocol):
     def list_conflicts(self) -> list[MemoryConflict]: ...
 
 
+class ScheduledEventSource(Protocol):
+    def subscribe(self) -> AsyncIterator[ScheduledExecutionEvent]: ...
+
+    def resolve(self, approval_id: UUID) -> None: ...
+
+
 class StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -242,6 +249,7 @@ def create_app(
     speech_output: SpeechOutputFactory | None = None,
     memory: MemoryAdministration | None = None,
     lifecycle: ApplicationLifecycle | None = None,
+    scheduled_events: ScheduledEventSource | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -623,6 +631,41 @@ def create_app(
                         )
                     )
 
+        async def pump_scheduled_events() -> None:
+            if scheduled_events is None:
+                return
+            async for scheduled_event in scheduled_events.subscribe():
+                snapshot = runtime.snapshot()
+                event_session = snapshot.session_id or connection_session
+                event_turn = snapshot.turn_id or connection_turn
+                approval = scheduled_event.execution.approval
+                if approval is not None:
+                    await emit(
+                        lambda current, prompt=approval, session=event_session, turn=event_turn: (
+                            _scheduled_approval_required_event(
+                                session_id=session,
+                                turn_id=turn,
+                                approval=prompt,
+                                sequence=current,
+                            )
+                        )
+                    )
+                    continue
+                result = scheduled_event.execution.result
+                if result.status is ExecutionStatus.AWAITING_APPROVAL:
+                    continue
+                await emit(
+                    lambda current, event=scheduled_event, session=event_session, turn=event_turn: (
+                        _scheduled_capability_result_event(
+                            session_id=session,
+                            turn_id=turn,
+                            capability=event.capability,
+                            result=event.execution.result,
+                            sequence=current,
+                        )
+                    )
+                )
+
         await emit(
             lambda current: _state_event(
                 runtime.snapshot(),
@@ -634,6 +677,14 @@ def create_app(
         desktop_speech_task = (
             asyncio.create_task(pump_desktop_speech(), name="jarvis-desktop-speech-events")
             if identity.kind == "desktop" and desktop_speech is not None
+            else None
+        )
+        scheduled_event_task = (
+            asyncio.create_task(
+                pump_scheduled_events(),
+                name="jarvis-scheduled-events",
+            )
+            if scheduled_events is not None
             else None
         )
 
@@ -671,6 +722,42 @@ def create_app(
                         capability_name = actions.pending_capability(
                             client_event.payload.approval_id
                         )
+                        if actions.pending_is_scheduled(client_event.payload.approval_id):
+                            try:
+                                scheduled_result = await actions.decide(
+                                    approval_id=client_event.payload.approval_id,
+                                    choice=ApprovalChoice(client_event.payload.decision),
+                                    device_id=client_event.payload.device_id,
+                                    now=datetime.now(UTC),
+                                )
+                            except (LookupError, PermissionError, ValueError):
+                                await emit(
+                                    lambda sequence, event=client_event: _approval_error_event(
+                                        event,
+                                        sequence=sequence,
+                                        code="approval_invalid",
+                                        message=(
+                                            "That approval is invalid, expired, or already "
+                                            "resolved."
+                                        ),
+                                        recoverable=True,
+                                    )
+                                )
+                                continue
+                            if scheduled_events is not None:
+                                scheduled_events.resolve(client_event.payload.approval_id)
+                            assert capability_name is not None
+                            await emit(
+                                lambda sequence, event=client_event, capability=capability_name, result=scheduled_result: (  # noqa: E501
+                                    _capability_result_event(
+                                        event,
+                                        capability=capability,
+                                        result=result,
+                                        sequence=sequence,
+                                    )
+                                )
+                            )
+                            continue
                         pending_turn = pending_approvals.get(client_event.payload.approval_id)
                         current = runtime.snapshot()
                         if (
@@ -838,6 +925,10 @@ def create_app(
                 desktop_speech_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await desktop_speech_task
+            if scheduled_event_task is not None:
+                scheduled_event_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await scheduled_event_task
 
     if settings.ui_directory is not None:
         app.mount(
@@ -1349,6 +1440,31 @@ def _approval_required_event(
     )
 
 
+def _scheduled_approval_required_event(
+    *,
+    session_id: UUID,
+    turn_id: UUID,
+    approval: ApprovalPrompt,
+    sequence: int,
+) -> ApprovalRequired:
+    return ApprovalRequired(
+        version=1,
+        event_id=uuid4(),
+        session_id=session_id,
+        turn_id=turn_id,
+        sequence=sequence,
+        timestamp=datetime.now(UTC),
+        type="approval_required",
+        payload=ApprovalRequiredPayload(
+            approval_id=approval.approval_id,
+            capability=approval.capability,
+            summary=approval.summary,
+            risk=approval.risk.value,
+            expires_at=approval.expires_at,
+        ),
+    )
+
+
 def _capability_result_event(
     client_event: SubmitText | ApprovalDecision,
     *,
@@ -1372,6 +1488,34 @@ def _capability_result_event(
             capability=capability,
             status=result.status.value,
             message=message,
+            undo_available=bool(result.output and result.output.get("undo_reference")),
+        ),
+    )
+
+
+def _scheduled_capability_result_event(
+    *,
+    session_id: UUID,
+    turn_id: UUID,
+    capability: str,
+    result: ExecutionResult,
+    sequence: int,
+) -> CapabilityResult:
+    if result.status is ExecutionStatus.AWAITING_APPROVAL:
+        raise ValueError("an awaiting result cannot be emitted as completed")
+    return CapabilityResult(
+        version=1,
+        event_id=uuid4(),
+        session_id=session_id,
+        turn_id=turn_id,
+        sequence=sequence,
+        timestamp=datetime.now(UTC),
+        type="capability_result",
+        payload=CapabilityResultPayload(
+            action_id=result.invocation_id,
+            capability=capability,
+            status=result.status.value,
+            message=result.reason or f"Scheduled {capability} completed.",
             undo_available=bool(result.output and result.output.get("undo_reference")),
         ),
     )

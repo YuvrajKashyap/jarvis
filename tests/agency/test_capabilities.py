@@ -281,3 +281,56 @@ async def test_coordinator_binds_approval_to_the_requesting_device(tmp_path: Pat
             device_id="phone",
             now=NOW,
         )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_executes_scheduled_local_action_under_standing_rule(
+    tmp_path: Path,
+) -> None:
+    capability = FakeRename()
+    engine, policy = build_engine(tmp_path, capability)
+    coordinator = InvocationCoordinator(engine=engine, policy=policy)
+
+    proposed = await coordinator.propose(
+        capability="files.rename",
+        arguments={"source": "draft.txt", "target": "final.txt"},
+        device_id="scheduler",
+        requested_at=NOW,
+        direct_request=False,
+        standing_rule_id="weekday-rename",
+        scheduled=True,
+    )
+
+    assert proposed.result.status is ExecutionStatus.SUCCEEDED
+    assert proposed.approval is None
+    assert len(capability.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_scheduled_external_approval_can_be_resolved_from_an_active_device(
+    tmp_path: Path,
+) -> None:
+    capability = FakeSend()
+    engine, policy = build_engine(tmp_path, capability)
+    coordinator = InvocationCoordinator(engine=engine, policy=policy)
+    proposed = await coordinator.propose(
+        capability="messages.send",
+        arguments={"source": "draft.txt", "target": "final.txt"},
+        device_id="scheduler",
+        requested_at=NOW,
+        direct_request=False,
+        standing_rule_id="weekday-message",
+        scheduled=True,
+    )
+    assert proposed.approval is not None
+    assert coordinator.pending_is_scheduled(proposed.approval.approval_id)
+
+    completed = await coordinator.decide(
+        approval_id=proposed.approval.approval_id,
+        choice=ApprovalChoice.APPROVE,
+        device_id="phone",
+        now=NOW,
+    )
+
+    assert completed.status is ExecutionStatus.SUCCEEDED
+    assert len(capability.calls) == 1

@@ -21,6 +21,7 @@ from jarvis.agency.capabilities import (
     ExecutionStatus,
 )
 from jarvis.agency.policy import ApprovalChoice, RiskClass
+from jarvis.agency.scheduler import ScheduledExecutionEvent
 from jarvis.memory.history import ConversationHistoryRepository
 from jarvis.memory.store import MemoryCandidate, MemoryRepository
 from jarvis.platform.api import ApiSettings, create_app
@@ -153,6 +154,9 @@ class FakeObserveAssistant:
 
 
 class FakeActions:
+    def pending_is_scheduled(self, approval_id: UUID) -> bool:
+        return False
+
     def pending_capability(self, approval_id: UUID) -> str | None:
         return "messages.send" if approval_id == APPROVAL_ID else None
 
@@ -164,6 +168,8 @@ class FakeActions:
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        standing_rule_id: str | None = None,
+        scheduled: bool = False,
     ) -> CoordinatedExecution:
         assert capability == "messages.send"
         assert device_id == "desktop"
@@ -213,6 +219,8 @@ class FakeObserveActions(FakeActions):
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        standing_rule_id: str | None = None,
+        scheduled: bool = False,
     ) -> CoordinatedExecution:
         assert capability == "context.active_window"
         return CoordinatedExecution(
@@ -222,6 +230,42 @@ class FakeObserveActions(FakeActions):
                 output={"title": "JARVIS", "process_name": "Code.exe"},
             )
         )
+
+
+class FakeScheduledActions(FakeActions):
+    def pending_is_scheduled(self, approval_id: UUID) -> bool:
+        return approval_id == APPROVAL_ID
+
+    async def decide(
+        self,
+        *,
+        approval_id: UUID,
+        choice: ApprovalChoice,
+        device_id: str,
+        now: datetime,
+    ) -> ExecutionResult:
+        assert approval_id == APPROVAL_ID
+        assert choice is ApprovalChoice.APPROVE
+        assert device_id == "desktop"
+        return ExecutionResult(
+            invocation_id=ACTION_ID,
+            status=ExecutionStatus.SUCCEEDED,
+            output={"sent": True},
+        )
+
+
+class FakeScheduledEvents:
+    def __init__(self, event: ScheduledExecutionEvent) -> None:
+        self._events: asyncio.Queue[ScheduledExecutionEvent] = asyncio.Queue()
+        self._events.put_nowait(event)
+        self.resolved: list[UUID] = []
+
+    async def subscribe(self):
+        while True:
+            yield await self._events.get()
+
+    def resolve(self, approval_id: UUID) -> None:
+        self.resolved.append(approval_id)
 
 
 class FakeSpeechSession:
@@ -806,6 +850,69 @@ def test_observation_result_returns_to_the_model_for_a_grounded_answer() -> None
     tool_context = assistant.continuations[1][0]
     assert tool_context.role == "tool"
     assert '"title":"JARVIS"' in tool_context.content
+
+
+def test_scheduled_external_action_is_pushed_and_approved_from_live_desktop() -> None:
+    approval = ApprovalPrompt(
+        approval_id=APPROVAL_ID,
+        capability="messages.send",
+        summary="Send the scheduled message",
+        risk=RiskClass.EXTERNAL_IRREVERSIBLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    scheduled_events = FakeScheduledEvents(
+        ScheduledExecutionEvent(
+            schedule_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cfc"),
+            schedule_name="Weekday message",
+            capability="messages.send",
+            occurred_at=datetime.now(UTC),
+            execution=CoordinatedExecution(
+                result=ExecutionResult(
+                    invocation_id=ACTION_ID,
+                    status=ExecutionStatus.AWAITING_APPROVAL,
+                    approval_id=APPROVAL_ID,
+                ),
+                approval=approval,
+            ),
+        )
+    )
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+        actions=FakeScheduledActions(),
+        scheduled_events=scheduled_events,
+    )
+
+    with TestClient(app).websocket_connect(
+        "/v1/live",
+        headers={"origin": "http://127.0.0.1:1420"},
+        subprotocols=["jarvis.v1", f"jarvis.desktop.{DESKTOP_TOKEN}"],
+    ) as socket:
+        assert socket.receive_json()["type"] == "state_changed"
+        prompt = socket.receive_json()
+        assert prompt["type"] == "approval_required"
+        socket.send_json(
+            client_event(
+                "approval_decision",
+                {
+                    "device_id": "desktop",
+                    "approval_id": str(APPROVAL_ID),
+                    "decision": "approve",
+                },
+                1,
+            )
+        )
+        result = socket.receive_json()
+
+    assert result["type"] == "capability_result"
+    assert result["payload"]["status"] == "succeeded"
+    assert scheduled_events.resolved == [APPROVAL_ID]
 
 
 def test_unknown_approval_never_enters_acting_state() -> None:

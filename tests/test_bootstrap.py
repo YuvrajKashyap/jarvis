@@ -34,8 +34,17 @@ def test_composition_root_creates_local_state_without_external_connections(tmp_p
         "files.write_text",
         "files.undo",
         "terminal.execute",
+        "browser.inspect",
+        "browser.navigate",
+        "browser.click",
+        "browser.fill",
+        "schedules.create",
+        "schedules.undo_create",
     ]
     assert application.state.actions is not None
+    assert application.state.browser is not None
+    assert application.state.scheduler is not None
+    assert application.state.memory_retrieval is not None
 
 
 def test_composition_root_reuses_api_secret_across_restarts(tmp_path: Path) -> None:

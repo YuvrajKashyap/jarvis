@@ -12,6 +12,12 @@ from fastapi import FastAPI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from jarvis.agency.browser import (
+    ClickBrowserCapability,
+    FillBrowserCapability,
+    InspectBrowserCapability,
+    NavigateBrowserCapability,
+)
 from jarvis.agency.capabilities import (
     CapabilityRegistry,
     InvocationCoordinator,
@@ -20,12 +26,22 @@ from jarvis.agency.capabilities import (
 from jarvis.agency.files import ReadTextCapability, UndoFileCapability, WriteTextCapability
 from jarvis.agency.observation import ActiveWindowCapability, SystemHealthCapability
 from jarvis.agency.policy import PolicyEngine
+from jarvis.agency.scheduler import (
+    CreateScheduleCapability,
+    ScheduledInvocationRuntime,
+    ScheduleRepository,
+    UndoScheduleCreationCapability,
+)
 from jarvis.agency.terminal import TerminalCommandCapability
 from jarvis.memory.history import ConversationHistoryRepository
+from jarvis.memory.retrieval import HybridMemoryRetriever
+from jarvis.memory.semantic import SemanticMemoryIndex
 from jarvis.memory.store import MemoryRepository
 from jarvis.perception.context import PerceptionCoordinator
 from jarvis.platform.api import ApiSettings
 from jarvis.platform.api import create_app as create_transport
+from jarvis.platform.browser import PlaywrightBrowser
+from jarvis.platform.embeddings import FastEmbedTextEmbeddings
 from jarvis.platform.filesystem import LocalFileStore
 from jarvis.platform.memory_context import LocalMemoryContext
 from jarvis.platform.ollama import OllamaProvider
@@ -182,6 +198,15 @@ def build_application(
         markdown_directory=settings.memory_directory,
     )
     memory.initialize()
+    memory_retrieval = HybridMemoryRetriever(
+        memory=memory,
+        semantic=SemanticMemoryIndex(
+            sqlite=sqlite,
+            embeddings=FastEmbedTextEmbeddings(
+                cache_directory=settings.data_directory / "models" / "fastembed"
+            ),
+        ),
+    )
     history = ConversationHistoryRepository(sqlite)
     runtime = RuntimeCoordinator()
     perception = PerceptionCoordinator(WindowsPerception())
@@ -200,9 +225,20 @@ def build_application(
         names=("git", "pnpm", "uv", "cargo", "rg"),
     )
     capabilities.register(TerminalCommandCapability(terminal))
+    browser = PlaywrightBrowser(settings.data_directory / "browser-profile")
+    capabilities.register(InspectBrowserCapability(browser))
+    capabilities.register(NavigateBrowserCapability(browser))
+    capabilities.register(ClickBrowserCapability(browser))
+    capabilities.register(FillBrowserCapability(browser))
     policy = PolicyEngine(SQLiteApprovalStore(sqlite))
     action_engine = InvocationEngine(registry=capabilities, policy=policy, audit=sqlite)
     actions = InvocationCoordinator(engine=action_engine, policy=policy)
+    scheduler = ScheduledInvocationRuntime(
+        repository=ScheduleRepository(sqlite),
+        actions=actions,
+    )
+    capabilities.register(CreateScheduleCapability(scheduler=scheduler, registry=capabilities))
+    capabilities.register(UndoScheduleCreationCapability(scheduler=scheduler))
     model = OllamaProvider()
     resources = ResourceGovernor(
         models=model,
@@ -212,6 +248,8 @@ def build_application(
     lifecycle = RuntimeLifecycle(
         models=resources if settings.model_prewarm_enabled else None,
         primary_model=settings.primary_model if settings.model_prewarm_enabled else None,
+        components=(scheduler,),
+        async_closeables=(browser,),
         closeables=(sqlite,),
     )
     assistant = AssistantTurn(
@@ -222,7 +260,7 @@ def build_application(
         ),
         tools=capabilities.tool_schemas(),
         readiness=resources,
-        context_provider=LocalMemoryContext(history=history, memory=memory),
+        context_provider=LocalMemoryContext(history=history, memory=memory_retrieval),
     )
     transcriber = FasterWhisperTranscriber(model_name=settings.whisper_model)
     speech_input = RemoteSpeechInput(
@@ -298,17 +336,21 @@ def build_application(
         speech_output=speech_output,
         memory=memory,
         lifecycle=lifecycle,
+        scheduled_events=scheduler,
     )
     application.state.runtime = runtime
     application.state.sqlite = sqlite
     application.state.memory = memory
+    application.state.memory_retrieval = memory_retrieval
     application.state.history = history
     application.state.perception = perception
     application.state.capabilities = capabilities
     application.state.files = files
     application.state.terminal = terminal
+    application.state.browser = browser
     application.state.policy = policy
     application.state.actions = actions
+    application.state.scheduler = scheduler
     application.state.phone_pairing = phone_pairing
     application.state.model = model
     application.state.resources = resources
