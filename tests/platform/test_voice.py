@@ -78,11 +78,18 @@ async def test_chatterbox_rejects_empty_and_unbounded_text(tmp_path: Path) -> No
 
 class FakeSoundDevice:
     def __init__(self) -> None:
-        self.played: list[tuple[np.ndarray, int, bool]] = []
+        self.played: list[tuple[np.ndarray, int, bool, int | str | None]] = []
         self.stopped = 0
 
-    def play(self, data: np.ndarray, samplerate: int, *, blocking: bool) -> None:
-        self.played.append((data, samplerate, blocking))
+    def play(
+        self,
+        data: np.ndarray,
+        samplerate: int,
+        *,
+        blocking: bool,
+        device: int | str | None = None,
+    ) -> None:
+        self.played.append((data, samplerate, blocking, device))
 
     def stop(self) -> None:
         self.stopped += 1
@@ -91,14 +98,15 @@ class FakeSoundDevice:
 @pytest.mark.asyncio
 async def test_desktop_speaker_plays_and_cancels_through_sounddevice() -> None:
     backend = FakeSoundDevice()
-    speaker = SoundDeviceSpeaker(backend=backend)
+    speaker = SoundDeviceSpeaker(backend=backend, device="Headphones")
 
     await speaker.play(SynthesizedAudio(sample_rate=24_000, pcm_s16le=b"\xff\x7f\x00\x80"))
     await speaker.cancel()
 
-    samples, sample_rate, blocking = backend.played[0]
+    samples, sample_rate, blocking, device = backend.played[0]
     assert sample_rate == 24_000
     assert blocking is True
+    assert device == "Headphones"
     assert samples.dtype == np.float32
     assert samples.tolist() == pytest.approx([32767 / 32768, -1.0])
     assert backend.stopped == 1

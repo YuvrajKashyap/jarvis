@@ -9,6 +9,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, PhysicalPosition, Position, RunEvent, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::ShortcutState;
+use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,26 @@ fn desktop_session_token(session: tauri::State<'_, DesktopSession>) -> String {
     session.token().to_owned()
 }
 
+fn validate_notification_message(message: &str) -> Result<&str, &'static str> {
+    let normalized = message.trim();
+    if normalized.is_empty() || normalized.len() > 1_000 {
+        return Err("notification message must contain between 1 and 1000 bytes");
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri command extraction requires owned inputs.
+fn show_reminder_notification(app: tauri::AppHandle, message: String) -> Result<(), String> {
+    let normalized = validate_notification_message(&message).map_err(str::to_owned)?;
+    app.notification()
+        .builder()
+        .title("JARVIS reminder")
+        .body(normalized)
+        .show()
+        .map_err(|error| error.to_string())
+}
+
 /// Starts the native JARVIS host.
 ///
 /// # Panics
@@ -51,7 +72,10 @@ pub fn run() {
         })
         .build();
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![desktop_session_token])
+        .invoke_handler(tauri::generate_handler![
+            desktop_session_token,
+            show_reminder_notification
+        ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = show_overlay(app);
             let _ = app.emit("jarvis://activate", "shortcut");
@@ -148,7 +172,7 @@ fn position_overlay(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::DesktopSession;
+    use super::{DesktopSession, validate_notification_message};
 
     #[test]
     fn desktop_session_tokens_are_high_entropy_and_unique() {
@@ -163,5 +187,15 @@ mod tests {
                 .chars()
                 .all(|character| character.is_ascii_hexdigit())
         );
+    }
+
+    #[test]
+    fn notification_messages_are_bounded_and_non_empty() {
+        assert_eq!(
+            validate_notification_message(" Leave for practice now. ").unwrap(),
+            "Leave for practice now."
+        );
+        assert!(validate_notification_message("   ").is_err());
+        assert!(validate_notification_message(&"x".repeat(1_001)).is_err());
     }
 }

@@ -49,4 +49,6 @@ Invoke-Checked $cargoPath @(
     "-D", "warnings"
 )
 
+& (Join-Path $PSScriptRoot "audit-dependencies.ps1")
+
 Write-Host "All JARVIS verification gates passed."

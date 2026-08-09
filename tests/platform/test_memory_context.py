@@ -70,3 +70,31 @@ async def test_context_combines_bounded_history_with_source_grounded_memory(tmp_
     assert "Retrieved local memory" in messages[0].content
     assert "Yuvraj uses an iPhone 17 Pro." in messages[0].content
     assert str(source_id) in messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_ambient_history_is_evidence_not_a_tool_message(tmp_path) -> None:
+    sqlite = SQLiteStore(tmp_path / "jarvis.db")
+    sqlite.initialize()
+    history = ConversationHistoryRepository(sqlite)
+    facts = MemoryRepository(sqlite=sqlite, markdown_directory=tmp_path / "Memory")
+    facts.initialize()
+    history.append(
+        ConversationMessage(
+            message_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf5"),
+            source_event_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf5"),
+            session_id=SESSION_ID,
+            turn_id=TURN_ID,
+            role=ConversationRole.AMBIENT,
+            content="The team chose Friday for the demo.",
+            device_id="desktop",
+            created_at=NOW,
+        )
+    )
+
+    messages = await LocalMemoryContext(history=history, memory=facts).context_for("demo")
+
+    assert messages[-1].role == "user"
+    assert messages[-1].content == (
+        "[Ambient awareness transcript] The team chose Friday for the demo."
+    )

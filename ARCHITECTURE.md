@@ -16,6 +16,8 @@ flowchart LR
   Agency --> Policy["Deterministic policy"]
   Agency --> Scheduler["Durable schedules + live approvals"]
   Agency --> Browser["Managed Playwright browser"]
+  Agency --> UIA["Microsoft Windows UI Automation"]
+  Agency --> Notify["Schedules + native reminders"]
   Intelligence --> Ollama["Ollama"]
   Memory --> SQLite["SQLite + Markdown + FTS5"]
   Memory --> Embeddings["CPU-local BGE embeddings"]
@@ -36,6 +38,11 @@ flowchart LR
 - Browser observation and operation use a JARVIS-owned persistent Edge profile. Model-facing targets are restricted to accessibility roles, labels, placeholders, and visible text; arbitrary selectors and page-script execution are not exposed.
 - Durable APScheduler jobs are reconstructed from validated SQLite records. Each run re-enters the capability coordinator and policy engine. External actions produce a fresh approval that is broadcast to authenticated live clients and replayed after reconnection until resolved.
 - Memory retrieval fuses SQLite FTS5 results with CPU-local BGE-small embeddings. Embedding rows contain no canonical facts, can be deleted and rebuilt, and fall back to lexical retrieval if the embedding runtime is unavailable.
+- Screen context is captured only for an explicit or contextually necessary active turn, compressed to a bounded in-memory image, marked as untrusted visual evidence, and never persisted by the context pipeline.
+- Foreground desktop operation uses Microsoft's UI Automation control patterns through the bounded `winapp` CLI adapter. Exact foreground-window handles, typed selectors, timeouts, output limits, and the policy engine constrain every operation; raw input injection is not exposed.
+- Explicit private, meeting, lecture, and ambient-memory modes share one speech state machine. Ambient transcripts cannot invoke the assistant or authorize actions.
+- Durable memory writes carry the originating conversation event, queue conflicts without overwrite, and expose exact audited undo references. Scheduled reminders re-enter policy and surface through both the overlay and native Windows notifications.
+- SQLite is backed up transactionally at startup and daily with bounded retention. Packaged logs are rotating structured JSON with credential redaction. Build artifacts include separate CycloneDX SBOMs for Python, Node, and Rust.
 - The Python core, browser, scheduler, model residency, and SQLite store share one ordered application lifecycle so startup rollback and shutdown do not strand background work.
 
 ## Dependency direction

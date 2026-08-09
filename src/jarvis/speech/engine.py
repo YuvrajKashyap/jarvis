@@ -30,6 +30,7 @@ class SpeechSettings(BaseModel):
 class SpeechPhase(StrEnum):
     IDLE = "idle"
     PRIVATE = "private"
+    AWARE = "aware"
     LISTENING = "listening"
     TRANSCRIBING = "transcribing"
     PLAYING = "playing"
@@ -43,6 +44,7 @@ class WakeDetected:
 @dataclass(frozen=True)
 class UtteranceReady:
     pcm: bytes
+    ambient: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,14 @@ class BargeIn:
 
 
 SpeechEvent = WakeDetected | UtteranceReady | BargeIn
+
+
+class AwarenessMode(StrEnum):
+    NORMAL = "normal"
+    PRIVATE = "private"
+    MEETING = "meeting"
+    LECTURE = "lecture"
+    AMBIENT = "ambient"
 
 
 class SpeechCoordinator:
@@ -68,8 +78,9 @@ class SpeechCoordinator:
         self._vad = vad
         self._playback = playback
         self._settings = settings
-        self._private = False
+        self._mode = AwarenessMode.NORMAL
         self._utterance = bytearray()
+        self._ambient_utterance = False
         self._speech_started = False
         self._silence_ms = 0
         self.phase = SpeechPhase.IDLE
@@ -84,11 +95,17 @@ class SpeechCoordinator:
             self.phase = SpeechPhase.LISTENING
             return BargeIn(captured_pcm=pcm)
 
-        if self.phase in {SpeechPhase.IDLE, SpeechPhase.PRIVATE}:
+        if self.phase in {SpeechPhase.IDLE, SpeechPhase.PRIVATE, SpeechPhase.AWARE}:
             if self._wake_word.detect(pcm):
                 self._reset_utterance()
                 self.phase = SpeechPhase.LISTENING
                 return WakeDetected(pre_roll_pcm=self._buffer.snapshot())
+            if self.phase is SpeechPhase.AWARE and self._vad.is_speech(pcm):
+                self._reset_utterance()
+                self._append_utterance(pcm)
+                self._speech_started = True
+                self._ambient_utterance = True
+                self.phase = SpeechPhase.LISTENING
             return None
 
         if self.phase is not SpeechPhase.LISTENING:
@@ -109,28 +126,32 @@ class SpeechCoordinator:
         )
         if reached_silence or len(self._utterance) >= maximum_bytes:
             pcm_result = bytes(self._utterance[:maximum_bytes])
+            ambient = self._ambient_utterance
             self._reset_utterance()
             self.phase = SpeechPhase.TRANSCRIBING
-            return UtteranceReady(pcm=pcm_result)
+            return UtteranceReady(pcm=pcm_result, ambient=ambient)
         return None
 
     def set_private(self, enabled: bool) -> None:
-        self._private = enabled
-        self._buffer.set_private(enabled)
+        self.set_mode(AwarenessMode.PRIVATE if enabled else AwarenessMode.NORMAL)
+
+    def set_mode(self, mode: AwarenessMode) -> None:
+        self._mode = mode
+        self._buffer.set_private(mode is AwarenessMode.PRIVATE)
         self._reset_utterance()
-        self.phase = SpeechPhase.PRIVATE if enabled else SpeechPhase.IDLE
+        self.phase = self._resting_phase()
 
     def complete_transcription(self) -> None:
         if self.phase is not SpeechPhase.TRANSCRIBING:
             raise RuntimeError("speech engine is not transcribing")
-        self.phase = SpeechPhase.PRIVATE if self._private else SpeechPhase.IDLE
+        self.phase = self._resting_phase()
 
     def begin_playback(self) -> None:
         self.phase = SpeechPhase.PLAYING
 
     def finish_playback(self) -> None:
         if self.phase is SpeechPhase.PLAYING:
-            self.phase = SpeechPhase.PRIVATE if self._private else SpeechPhase.IDLE
+            self.phase = self._resting_phase()
 
     def _append_utterance(self, pcm: bytes) -> None:
         maximum_bytes = (
@@ -142,5 +163,17 @@ class SpeechCoordinator:
 
     def _reset_utterance(self) -> None:
         self._utterance.clear()
+        self._ambient_utterance = False
         self._speech_started = False
         self._silence_ms = 0
+
+    def _resting_phase(self) -> SpeechPhase:
+        if self._mode is AwarenessMode.PRIVATE:
+            return SpeechPhase.PRIVATE
+        if self._mode in {
+            AwarenessMode.MEETING,
+            AwarenessMode.LECTURE,
+            AwarenessMode.AMBIENT,
+        }:
+            return SpeechPhase.AWARE
+        return SpeechPhase.IDLE

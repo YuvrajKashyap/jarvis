@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Thin Windows host and supervisor for JARVIS"
 authors = ["Yuvraj Kashyap"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Proprietary"
 
 [lib]

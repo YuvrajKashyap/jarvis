@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationOverlay, type OverlayView } from "./overlay";
@@ -145,5 +145,26 @@ describe("ConversationOverlay", () => {
     expect(screen.getByRole("img", { name: "One-use iPhone pairing code" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Close pairing" }));
     expect(onClosePairing).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["meeting", "Meeting mode"],
+    ["lecture", "Lecture mode"],
+    ["ambient", "Ambient memory mode"],
+  ] as const)("shows the explicit %s awareness state", (state, label) => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({ state })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(within(rendered.container).getByRole("status")).toHaveTextContent(label);
+    rendered.unmount();
   });
 });

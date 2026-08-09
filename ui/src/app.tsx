@@ -10,7 +10,13 @@ import { ConversationOverlay } from "./overlay";
 import { PhoneMicrophone } from "./phone-audio";
 import { authenticatePhone } from "./phone-auth";
 import { PhoneSpeaker } from "./phone-speaker";
-import { initialView, reduceServerEvent, type SessionView } from "./session";
+import {
+  initialView,
+  isReminderNotification,
+  reduceServerEvent,
+  type SessionView,
+  shouldRevealDesktopOverlay,
+} from "./session";
 
 export function App() {
   const surface = useMemo(() => (isDesktopHost() ? "desktop" : "phone"), []);
@@ -33,12 +39,14 @@ export function App() {
       onConnection: (connection) => setView((current) => ({ ...current, connection })),
       onEvent: (event) => {
         setView((current) => reduceServerEvent(current, event));
-        if (surface === "desktop" && event.type === "state_changed") {
-          if (event.payload.state === "listening") {
-            void getCurrentWindow()
-              .show()
-              .then(() => getCurrentWindow().setFocus());
-          }
+        if (surface === "desktop" && isReminderNotification(event)) {
+          void invoke("show_reminder_notification", { message: event.payload.message });
+        }
+        if (surface === "desktop" && shouldRevealDesktopOverlay(event)) {
+          const window = getCurrentWindow();
+          void window.show().then(() => {
+            if (!isReminderNotification(event)) return window.setFocus();
+          });
         }
       },
       onAudio: (pcm) => void speaker.current?.play(pcm),
@@ -67,9 +75,10 @@ export function App() {
 
   useEffect(() => {
     if (surface !== "desktop" || view.state !== "idle" || pairing) return;
-    const timer = window.setTimeout(() => void getCurrentWindow().hide(), 5_000);
+    const hideDelay = view.detail ? 8_000 : 5_000;
+    const timer = window.setTimeout(() => void getCurrentWindow().hide(), hideDelay);
     return () => window.clearTimeout(timer);
-  }, [pairing, surface, view.state]);
+  }, [pairing, surface, view.detail, view.state]);
 
   useEffect(() => {
     if (surface === "phone" && view.state === "idle") void microphone.current?.stop();

@@ -1,5 +1,6 @@
 from jarvis.speech.audio import AudioFormat, AudioRingBuffer
 from jarvis.speech.engine import (
+    AwarenessMode,
     BargeIn,
     SpeechCoordinator,
     SpeechPhase,
@@ -111,3 +112,28 @@ def test_maximum_utterance_bounds_audio_growth() -> None:
 
     assert isinstance(event, UtteranceReady)
     assert len(event.pcm) <= FORMAT.bytes_per_second * 30
+
+
+def test_meeting_mode_transcribes_speech_without_treating_it_as_a_command() -> None:
+    coordinator, wake, _playback = engine()
+    coordinator.set_mode(AwarenessMode.MEETING)
+    wake.should_wake = False
+
+    assert coordinator.ingest(b"\x03" * FRAME_BYTES) is None
+    assert coordinator.ingest(b"\x00" * FRAME_BYTES) is None
+    event = coordinator.ingest(b"\x00" * FRAME_BYTES)
+
+    assert isinstance(event, UtteranceReady)
+    assert event.ambient is True
+    assert coordinator.phase is SpeechPhase.TRANSCRIBING
+
+
+def test_wake_phrase_in_awareness_mode_still_starts_a_direct_jarvis_turn() -> None:
+    coordinator, wake, _playback = engine()
+    coordinator.set_mode(AwarenessMode.LECTURE)
+    wake.should_wake = True
+
+    event = coordinator.ingest(b"\x03" * FRAME_BYTES)
+
+    assert isinstance(event, WakeDetected)
+    assert coordinator.phase is SpeechPhase.LISTENING

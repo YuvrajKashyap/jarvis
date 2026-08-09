@@ -4,7 +4,7 @@ JARVIS is Yuvraj's private, local-first AI control plane: an ambient desktop ass
 
 The product definition lives in `project_spec.md`; the intended lived outcome lives in `NORTHSTAR.md`. Implementation details must not quietly redefine either document.
 
-The current local foundation includes the authenticated desktop/phone transport, streamed conversation runtime, deterministic permission and approval kernel, durable memory and conversation history, hybrid local retrieval, structured managed-browser operation, durable scheduled capability execution with live approvals, speech seams, Ollama resource governance, and Windows packaging. Real-device wake-word, acoustic, thermal, selected-voice, and iPhone/Tailscale acceptance remain hardware gates rather than assumed successes.
+The current local product includes the authenticated desktop/phone transport, streamed conversation runtime, deterministic permission and approval kernel, source-grounded durable memory, hybrid local retrieval, ephemeral screenshot-to-vision context, managed browser and Windows UI Automation, durable schedules and native reminders, explicit private/meeting/lecture/ambient modes, rotating backups and redacted logs, Ollama resource governance, and Windows packaging. Real-device wake-word, acoustic, thermal, selected-voice, and iPhone/Tailscale acceptance remain hardware gates rather than assumed successes.
 
 ## Commands
 
@@ -13,6 +13,9 @@ pnpm bootstrap   # install locked Python, JavaScript, and Rust dependencies
 pnpm dev         # run the Tauri host, supervised Python core, and shared UI
 pnpm verify      # format, lint, type-check, test, and build every layer
 pnpm benchmark   # run local model, speech, memory, and resource evaluations
+pnpm preflight   # report automatic readiness and the remaining physical/manual gates
+pnpm security-audit # audit Python, Node, and Rust dependencies
+pnpm supply-chain  # generate Python, Node, and Rust CycloneDX SBOMs
 pnpm package     # build the Python sidecar and unsigned Windows installer
 ```
 

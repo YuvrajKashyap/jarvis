@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from jarvis.speech.engine import BargeIn, SpeechCoordinator, UtteranceReady, WakeDetected
+from jarvis.speech.engine import (
+    AwarenessMode,
+    BargeIn,
+    SpeechCoordinator,
+    UtteranceReady,
+    WakeDetected,
+)
 
 
 class MicrophoneCapture(Protocol):
@@ -30,6 +36,12 @@ class DesktopTranscript:
 
 
 @dataclass(frozen=True)
+class DesktopAmbientTranscript:
+    text: str
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
 class DesktopBargeIn:
     occurred_at: datetime
 
@@ -40,7 +52,9 @@ class DesktopSpeechError:
     occurred_at: datetime
 
 
-DesktopSpeechEvent = DesktopWake | DesktopTranscript | DesktopBargeIn | DesktopSpeechError
+DesktopSpeechEvent = (
+    DesktopWake | DesktopTranscript | DesktopAmbientTranscript | DesktopBargeIn | DesktopSpeechError
+)
 
 
 class DesktopSpeechSource(Protocol):
@@ -51,6 +65,8 @@ class DesktopSpeechSource(Protocol):
     async def next_event(self) -> DesktopSpeechEvent: ...
 
     async def set_private(self, enabled: bool) -> None: ...
+
+    async def set_mode(self, mode: AwarenessMode) -> None: ...
 
 
 class DesktopSpeechService:
@@ -102,6 +118,9 @@ class DesktopSpeechService:
     async def set_private(self, enabled: bool) -> None:
         await asyncio.to_thread(self._coordinator.set_private, enabled)
 
+    async def set_mode(self, mode: AwarenessMode) -> None:
+        await asyncio.to_thread(self._coordinator.set_mode, mode)
+
     def _accept_frame(self, pcm: bytes) -> None:
         loop = self._loop
         if loop is not None:
@@ -123,7 +142,7 @@ class DesktopSpeechService:
                 elif isinstance(speech_event, BargeIn):
                     self._publish(DesktopBargeIn(occurred_at=datetime.now(UTC)))
                 elif isinstance(speech_event, UtteranceReady):
-                    await self._transcribe(speech_event.pcm)
+                    await self._transcribe(speech_event.pcm, ambient=speech_event.ambient)
             except (OSError, RuntimeError, ValueError):
                 self._publish(
                     DesktopSpeechError(
@@ -132,13 +151,18 @@ class DesktopSpeechService:
                     )
                 )
 
-    async def _transcribe(self, pcm: bytes) -> None:
+    async def _transcribe(self, pcm: bytes, *, ambient: bool) -> None:
         try:
             text = (await self._transcriber.transcribe(pcm)).strip()
         finally:
             self._coordinator.complete_transcription()
         if text:
-            self._publish(DesktopTranscript(text=text, occurred_at=datetime.now(UTC)))
+            event = (
+                DesktopAmbientTranscript(text=text, occurred_at=datetime.now(UTC))
+                if ambient
+                else DesktopTranscript(text=text, occurred_at=datetime.now(UTC))
+            )
+            self._publish(event)
 
     def _publish(self, event: DesktopSpeechEvent) -> None:
         if self._events.full():

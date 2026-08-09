@@ -112,3 +112,13 @@ def test_capability_work_has_explicit_approval_and_acting_phases() -> None:
     resumed = runtime.resume_thinking(device_id="desktop")
 
     assert resumed.phase is RuntimePhase.THINKING
+
+
+def test_explicit_awareness_modes_remain_active_between_turns() -> None:
+    runtime = RuntimeCoordinator()
+
+    runtime.set_mode(ListeningMode.LECTURE)
+    runtime.activate(session_id=SESSION_ID, turn_id=TURN_ID, device_id="desktop")
+    completed = runtime.complete_turn()
+
+    assert completed.mode is ListeningMode.LECTURE

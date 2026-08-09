@@ -22,21 +22,44 @@ from jarvis.agency.capabilities import (
 )
 from jarvis.agency.policy import ApprovalChoice, RiskClass
 from jarvis.agency.scheduler import ScheduledExecutionEvent
-from jarvis.memory.history import ConversationHistoryRepository
+from jarvis.memory.history import ConversationHistoryRepository, ConversationRole
 from jarvis.memory.store import MemoryCandidate, MemoryRepository
-from jarvis.platform.api import ApiSettings, create_app
+from jarvis.platform.api import ApiSettings, _scheduled_capability_result_event, create_app
 from jarvis.platform.models import ChatMessage, ToolCall
 from jarvis.platform.pairing import InMemoryPairingStore, PhonePairing, public_key_to_jwk
 from jarvis.platform.sqlite import SQLiteStore
 from jarvis.runtime.assistant import TextDelta, ToolProposal, TurnComplete
 from jarvis.runtime.conversation import ListeningMode, RuntimeCoordinator
-from jarvis.speech.desktop import DesktopSpeechEvent, DesktopTranscript, DesktopWake
+from jarvis.runtime.resources import ResourcePressure
+from jarvis.speech.desktop import (
+    DesktopAmbientTranscript,
+    DesktopSpeechEvent,
+    DesktopTranscript,
+    DesktopWake,
+)
+from jarvis.speech.engine import AwarenessMode
 from jarvis.speech.output import SpeechOutputSession
 
 TOKEN = "test-token-that-is-at-least-thirty-two-characters"
 DESKTOP_TOKEN = "ephemeral-desktop-token-that-is-at-least-thirty-two-characters"
 SESSION_ID = "019fd977-1d96-7892-950c-6afbb71f7cf0"
 TURN_ID = "019fd977-1d96-7892-950c-6afbb71f7cf1"
+
+
+def test_scheduled_reminder_uses_notification_text_as_user_facing_message() -> None:
+    event = _scheduled_capability_result_event(
+        session_id=UUID(SESSION_ID),
+        turn_id=UUID(TURN_ID),
+        capability="notifications.remind",
+        result=ExecutionResult(
+            invocation_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf2"),
+            status=ExecutionStatus.SUCCEEDED,
+            output={"title": "Tennis", "message": "Leave for practice now."},
+        ),
+        sequence=4,
+    )
+
+    assert event.payload.message == "Leave for practice now."
 
 
 class FakeAssistant:
@@ -52,6 +75,32 @@ class FakeAssistant:
         yield TextDelta(text="You are looking ")
         yield TextDelta(text="at the JARVIS project.")
         yield TurnComplete(tokens_per_second=25)
+
+
+class ResourceBlockedAssistant:
+    async def stream(
+        self,
+        user_text: str,
+        *,
+        cancelled: object,
+        context: tuple[object, ...] = (),
+        continuation: tuple[object, ...] = (),
+    ):
+        raise ResourcePressure("available_memory")
+        yield
+
+
+class UnexpectedAssistant:
+    async def stream(
+        self,
+        user_text: str,
+        *,
+        cancelled: object,
+        context: tuple[object, ...] = (),
+        continuation: tuple[object, ...] = (),
+    ):
+        raise RuntimeError("assistant must not run for a deterministic awareness command")
+        yield
 
 
 class FakeSpeechInput:
@@ -71,6 +120,7 @@ class FakeDesktopSpeech:
         self.events: queue.Queue[DesktopSpeechEvent] = queue.Queue()
         self.started = False
         self.stopped = False
+        self.mode = AwarenessMode.NORMAL
 
     async def start(self) -> None:
         self.started = True
@@ -86,7 +136,10 @@ class FakeDesktopSpeech:
                 await asyncio.sleep(0)
 
     async def set_private(self, enabled: bool) -> None:
-        return None
+        self.mode = AwarenessMode.PRIVATE if enabled else AwarenessMode.NORMAL
+
+    async def set_mode(self, mode: AwarenessMode) -> None:
+        self.mode = mode
 
     def push(self, event: DesktopSpeechEvent) -> None:
         self.events.put(event)
@@ -168,12 +221,14 @@ class FakeActions:
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        source_event_id: UUID | None = None,
         standing_rule_id: str | None = None,
         scheduled: bool = False,
     ) -> CoordinatedExecution:
         assert capability == "messages.send"
         assert device_id == "desktop"
         assert direct_request is False
+        assert source_event_id is not None
         return CoordinatedExecution(
             result=ExecutionResult(
                 invocation_id=ACTION_ID,
@@ -219,6 +274,7 @@ class FakeObserveActions(FakeActions):
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        source_event_id: UUID | None = None,
         standing_rule_id: str | None = None,
         scheduled: bool = False,
     ) -> CoordinatedExecution:
@@ -571,6 +627,50 @@ def test_text_turn_streams_transcript_and_assistant_without_blocking_protocol(
     assert speech_output.sessions[0].cancelled is False
 
 
+def test_resource_pressure_keeps_runtime_alive_and_explains_unavailability() -> None:
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        assistant=ResourceBlockedAssistant(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+    with TestClient(app).websocket_connect(
+        "/v1/live",
+        headers={
+            "authorization": f"Bearer {TOKEN}",
+            "origin": "http://127.0.0.1:1420",
+        },
+    ) as socket:
+        socket.receive_json()
+        socket.send_json(
+            client_event("activate", {"device_id": "desktop", "source": "keyboard"}, 0)
+        )
+        socket.receive_json()
+        socket.send_json(
+            client_event(
+                "submit_text",
+                {"device_id": "desktop", "text": "What am I looking at?"},
+                1,
+            )
+        )
+        streamed = [socket.receive_json() for _ in range(4)]
+
+    assert [event["type"] for event in streamed] == [
+        "state_changed",
+        "transcript",
+        "error",
+        "state_changed",
+    ]
+    assert streamed[2]["payload"]["code"] == "resource_pressure"
+    assert "memory" in streamed[2]["payload"]["message"].lower()
+    assert streamed[3]["payload"]["state"] == "idle"
+
+
 def test_intentional_turn_is_persisted_and_exposed_only_to_authenticated_clients(
     tmp_path: Path,
 ) -> None:
@@ -660,6 +760,103 @@ def test_private_mode_does_not_persist_the_turn(tmp_path: Path) -> None:
         for _ in range(7):
             socket.receive_json()
 
+    assert history.recent(limit=10) == []
+
+
+def test_explicit_meeting_mode_persists_ambient_transcript_without_invoking_assistant(
+    tmp_path: Path,
+) -> None:
+    database = SQLiteStore(tmp_path / "jarvis.db")
+    database.initialize()
+    history = ConversationHistoryRepository(database)
+    speech = FakeDesktopSpeech()
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        desktop_speech=speech,
+        history=history,
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+    with TestClient(app).websocket_connect(
+        "/v1/live",
+        headers={"origin": "http://127.0.0.1:1420"},
+        subprotocols=["jarvis.v1", f"jarvis.desktop.{DESKTOP_TOKEN}"],
+    ) as socket:
+        socket.receive_json()
+        socket.send_json(
+            client_event(
+                "mode_change",
+                {"device_id": "desktop", "mode": "meeting"},
+                0,
+            )
+        )
+        changed = socket.receive_json()
+        speech.push(
+            DesktopAmbientTranscript(
+                text="The team chose Friday for the demo.",
+                occurred_at=datetime.now(UTC),
+            )
+        )
+        transcript = socket.receive_json()
+
+    assert speech.mode is AwarenessMode.MEETING
+    assert changed["payload"]["state"] == "meeting"
+    assert transcript["type"] == "transcript"
+    assert transcript["payload"]["speaker"] == "ambient"
+    assert [(item.role, item.content) for item in history.recent(limit=10)] == [
+        (ConversationRole.AMBIENT, "The team chose Friday for the demo.")
+    ]
+
+
+def test_spoken_private_command_changes_mode_without_model_or_persistence(tmp_path: Path) -> None:
+    database = SQLiteStore(tmp_path / "jarvis.db")
+    database.initialize()
+    history = ConversationHistoryRepository(database)
+    speech = FakeDesktopSpeech()
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        assistant=UnexpectedAssistant(),
+        desktop_speech=speech,
+        history=history,
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+    with TestClient(app).websocket_connect(
+        "/v1/live",
+        headers={"origin": "http://127.0.0.1:1420"},
+        subprotocols=["jarvis.v1", f"jarvis.desktop.{DESKTOP_TOKEN}"],
+    ) as socket:
+        socket.receive_json()
+        socket.send_json(client_event("activate", {"device_id": "desktop", "source": "ui"}, 0))
+        socket.receive_json()
+        socket.send_json(
+            client_event(
+                "submit_text",
+                {"device_id": "desktop", "text": "Go completely private."},
+                1,
+            )
+        )
+        events = [socket.receive_json() for _ in range(4)]
+
+    assert speech.mode is AwarenessMode.PRIVATE
+    assert [event["type"] for event in events] == [
+        "transcript",
+        "assistant_text",
+        "assistant_text",
+        "state_changed",
+    ]
+    assert "Private mode is on" in events[1]["payload"]["text"]
+    assert events[-1]["payload"]["state"] == "private"
     assert history.recent(limit=10) == []
 
 

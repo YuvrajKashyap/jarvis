@@ -76,6 +76,19 @@ def test_client_event_requires_timezone_aware_timestamp() -> None:
         parse_client_event(raw_event)
 
 
+@pytest.mark.parametrize("mode", ["normal", "private", "meeting", "lecture", "ambient"])
+def test_awareness_modes_are_versioned_protocol_values(mode: str) -> None:
+    raw_event = valid_submit_event() | {
+        "type": "mode_change",
+        "payload": {"device_id": "desktop", "mode": mode},
+    }
+
+    parsed = parse_client_event(raw_event)
+
+    assert isinstance(parsed, ModeChange)
+    assert parsed.payload.mode == mode
+
+
 @pytest.mark.parametrize(
     ("event_type", "payload", "expected_type"),
     [

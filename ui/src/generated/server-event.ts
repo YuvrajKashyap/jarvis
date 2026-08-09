@@ -23,6 +23,8 @@ export type State =
   | "speaking"
   | "private"
   | "meeting"
+  | "lecture"
+  | "ambient"
   | "unavailable";
 export type Detail = string | null;
 export type Version1 = 1;

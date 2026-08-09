@@ -1,6 +1,7 @@
 import json
 import os
 import secrets as secret_tokens
+import shutil
 import threading
 from pathlib import Path
 from typing import Literal, Protocol
@@ -24,6 +25,8 @@ from jarvis.agency.capabilities import (
     InvocationEngine,
 )
 from jarvis.agency.files import ReadTextCapability, UndoFileCapability, WriteTextCapability
+from jarvis.agency.memory import RememberMemoryCapability, UndoRememberMemoryCapability
+from jarvis.agency.notifications import ReminderCapability
 from jarvis.agency.observation import ActiveWindowCapability, SystemHealthCapability
 from jarvis.agency.policy import PolicyEngine
 from jarvis.agency.scheduler import (
@@ -33,6 +36,11 @@ from jarvis.agency.scheduler import (
     UndoScheduleCreationCapability,
 )
 from jarvis.agency.terminal import TerminalCommandCapability
+from jarvis.agency.windows import (
+    InspectWindowsCapability,
+    InvokeWindowsCapability,
+    SetWindowsValueCapability,
+)
 from jarvis.memory.history import ConversationHistoryRepository
 from jarvis.memory.retrieval import HybridMemoryRetriever
 from jarvis.memory.semantic import SemanticMemoryIndex
@@ -40,14 +48,16 @@ from jarvis.memory.store import MemoryRepository
 from jarvis.perception.context import PerceptionCoordinator
 from jarvis.platform.api import ApiSettings
 from jarvis.platform.api import create_app as create_transport
+from jarvis.platform.backups import SQLiteBackupService
 from jarvis.platform.browser import PlaywrightBrowser
 from jarvis.platform.embeddings import FastEmbedTextEmbeddings
 from jarvis.platform.filesystem import LocalFileStore
+from jarvis.platform.logging import configure_local_logging
 from jarvis.platform.memory_context import LocalMemoryContext
 from jarvis.platform.ollama import OllamaProvider
 from jarvis.platform.pairing import PhonePairing
 from jarvis.platform.pairing_sqlite import SQLitePairingStore
-from jarvis.platform.process import LocalCommandRunner
+from jarvis.platform.process import BoundedProcessRunner, LocalCommandRunner
 from jarvis.platform.resources import WindowsResourceProbe
 from jarvis.platform.speech import (
     FasterWhisperTranscriber,
@@ -57,8 +67,9 @@ from jarvis.platform.speech import (
 )
 from jarvis.platform.sqlite import SQLiteApprovalStore, SQLiteStore
 from jarvis.platform.voice import ChatterboxTurboSynthesizer, SoundDeviceSpeaker
-from jarvis.platform.windows import WindowsPerception
+from jarvis.platform.windows import WinAppAutomation, WindowsPerception, foreground_window_handle
 from jarvis.runtime.assistant import AssistantSettings, AssistantTurn
+from jarvis.runtime.context import ScreenContextSource, TurnContextAssembler
 from jarvis.runtime.conversation import RuntimeCoordinator
 from jarvis.runtime.lifecycle import RuntimeLifecycle
 from jarvis.runtime.resources import ResourceGovernor, ResourceLimits
@@ -114,6 +125,13 @@ def _default_whisper_model() -> str:
     return str(managed) if (managed / "model.bin").is_file() else "distil-small.en"
 
 
+def _default_winapp_executable() -> Path:
+    discovered = shutil.which("winapp")
+    if discovered is not None:
+        return Path(discovered)
+    return Path.home() / "AppData" / "Local" / "Microsoft" / "WindowsApps" / "winapp.exe"
+
+
 def _default_ui_directory() -> Path | None:
     candidates = (
         Path(__file__).with_name("ui_dist"),
@@ -139,8 +157,12 @@ class BootstrapSettings(BaseSettings):
     primary_model: str = Field(default="qwen3.5:4b-q4_K_M", min_length=1, max_length=160)
     model_context_length: int = Field(default=4_096, ge=512, le=8_192)
     model_prewarm_enabled: bool = True
+    backup_retention: int = Field(default=7, ge=1, le=100)
+    windows_automation_executable: Path = Field(default_factory=_default_winapp_executable)
     whisper_model: str = Field(default_factory=_default_whisper_model, min_length=1, max_length=512)
     desktop_speech_enabled: bool = True
+    speech_input_device: str | None = Field(default=None, min_length=1, max_length=240)
+    speech_output_device: str | None = Field(default=None, min_length=1, max_length=240)
     voice_reference_path: Path | None = None
     voice_device: Literal["cpu", "cuda"] = "cuda"
     phone_base_url: str | None = Field(default_factory=_default_phone_base_url)
@@ -230,6 +252,18 @@ def build_application(
     capabilities.register(NavigateBrowserCapability(browser))
     capabilities.register(ClickBrowserCapability(browser))
     capabilities.register(FillBrowserCapability(browser))
+    windows_automation = WinAppAutomation(
+        executable=settings.windows_automation_executable,
+        runner=BoundedProcessRunner(),
+        window_handle=foreground_window_handle,
+        working_directory=settings.data_directory,
+    )
+    capabilities.register(InspectWindowsCapability(windows_automation))
+    capabilities.register(InvokeWindowsCapability(windows_automation))
+    capabilities.register(SetWindowsValueCapability(windows_automation))
+    capabilities.register(RememberMemoryCapability(memory))
+    capabilities.register(UndoRememberMemoryCapability(memory))
+    capabilities.register(ReminderCapability())
     policy = PolicyEngine(SQLiteApprovalStore(sqlite))
     action_engine = InvocationEngine(registry=capabilities, policy=policy, audit=sqlite)
     actions = InvocationCoordinator(engine=action_engine, policy=policy)
@@ -239,6 +273,11 @@ def build_application(
     )
     capabilities.register(CreateScheduleCapability(scheduler=scheduler, registry=capabilities))
     capabilities.register(UndoScheduleCreationCapability(scheduler=scheduler))
+    backups = SQLiteBackupService(
+        store=sqlite,
+        directory=settings.data_directory / "backups",
+        retain=settings.backup_retention,
+    )
     model = OllamaProvider()
     resources = ResourceGovernor(
         models=model,
@@ -248,9 +287,15 @@ def build_application(
     lifecycle = RuntimeLifecycle(
         models=resources if settings.model_prewarm_enabled else None,
         primary_model=settings.primary_model if settings.model_prewarm_enabled else None,
-        components=(scheduler,),
+        components=(backups, scheduler),
         async_closeables=(browser,),
         closeables=(sqlite,),
+    )
+    turn_context = TurnContextAssembler(
+        (
+            LocalMemoryContext(history=history, memory=memory_retrieval),
+            ScreenContextSource(perception),
+        )
     )
     assistant = AssistantTurn(
         model=model,
@@ -260,7 +305,7 @@ def build_application(
         ),
         tools=capabilities.tool_schemas(),
         readiness=resources,
-        context_provider=LocalMemoryContext(history=history, memory=memory_retrieval),
+        context_provider=turn_context,
     )
     transcriber = FasterWhisperTranscriber(model_name=settings.whisper_model)
     speech_input = RemoteSpeechInput(
@@ -268,7 +313,11 @@ def build_application(
         transcriber=transcriber,
         settings=RemoteSpeechSettings(),
     )
-    speaker = SoundDeviceSpeaker() if settings.voice_reference_path is not None else None
+    speaker = (
+        SoundDeviceSpeaker(device=settings.speech_output_device)
+        if settings.voice_reference_path is not None
+        else None
+    )
     speech_output = (
         None
         if settings.voice_reference_path is None or speaker is None
@@ -283,7 +332,7 @@ def build_application(
     desktop_speech = None
     if settings.desktop_speech_enabled:
         desktop_speech = DesktopSpeechService(
-            microphone=SoundDeviceMicrophone(),
+            microphone=SoundDeviceMicrophone(device=settings.speech_input_device),
             coordinator=SpeechCoordinator(
                 buffer=AudioRingBuffer(
                     audio_format=AudioFormat(
@@ -348,14 +397,17 @@ def build_application(
     application.state.files = files
     application.state.terminal = terminal
     application.state.browser = browser
+    application.state.windows_automation = windows_automation
     application.state.policy = policy
     application.state.actions = actions
     application.state.scheduler = scheduler
+    application.state.backups = backups
     application.state.phone_pairing = phone_pairing
     application.state.model = model
     application.state.resources = resources
     application.state.lifecycle = lifecycle
     application.state.assistant = assistant
+    application.state.turn_context = turn_context
     application.state.speech_input = speech_input
     application.state.desktop_speech = desktop_speech
     application.state.speech_output = speech_output
@@ -371,6 +423,7 @@ def create_app() -> FastAPI:
 
 def main() -> None:
     settings = BootstrapSettings()
+    configure_local_logging(settings.data_directory)
     uvicorn.run(
         build_application(settings=settings, secrets=WindowsCredentialStore()),
         host=settings.host,

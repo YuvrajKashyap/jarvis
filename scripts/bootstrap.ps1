@@ -40,11 +40,18 @@ Require-Command "uv"
 Require-Command "cargo"
 Require-Command "ollama"
 
+if (-not (Get-Command "cargo-cyclonedx" -ErrorAction SilentlyContinue)) {
+    Invoke-Checked "cargo" @("install", "cargo-cyclonedx", "--locked")
+}
+if (-not (Get-Command "cargo-audit" -ErrorAction SilentlyContinue)) {
+    Invoke-Checked "cargo" @("install", "cargo-audit", "--locked")
+}
+
 if (-not (Get-Command "tailscale" -ErrorAction SilentlyContinue)) {
     Write-Warning "Tailscale is not installed yet. Desktop development works; phone access remains unavailable."
 }
 
-Invoke-Checked "uv" @("sync", "--frozen", "--extra", "speech", "--extra", "voice")
+Invoke-Checked "uv" @("sync", "--frozen", "--extra", "speech")
 Invoke-Checked "uv" @("run", "python", "scripts/prefetch_models.py", "--core")
 Invoke-Checked "pnpm" @("install", "--frozen-lockfile")
 Invoke-Checked "cargo" @("fetch", "--locked", "--manifest-path", "src-tauri/Cargo.toml")

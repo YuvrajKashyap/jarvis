@@ -16,6 +16,8 @@ class ListeningMode(StrEnum):
     NORMAL = "normal"
     PRIVATE = "private"
     MEETING = "meeting"
+    LECTURE = "lecture"
+    AMBIENT = "ambient"
 
 
 class InvalidTransition(RuntimeError):

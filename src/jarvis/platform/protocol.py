@@ -81,7 +81,7 @@ class TransferDevice(EventEnvelope):
 
 class ModeChangePayload(ProtocolModel):
     device_id: DeviceId
-    mode: Literal["normal", "private", "meeting"]
+    mode: Literal["normal", "private", "meeting", "lecture", "ambient"]
 
 
 class ModeChange(EventEnvelope):
@@ -106,6 +106,8 @@ class StateChangedPayload(ProtocolModel):
         "speaking",
         "private",
         "meeting",
+        "lecture",
+        "ambient",
         "unavailable",
     ]
     detail: Annotated[str | None, Field(max_length=512)] = None

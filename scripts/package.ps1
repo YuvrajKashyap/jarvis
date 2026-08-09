@@ -17,6 +17,7 @@ function Invoke-Checked {
 }
 
 & (Join-Path $PSScriptRoot "verify.ps1")
+& (Join-Path $PSScriptRoot "generate-sbom.ps1")
 
 $sidecarDirectory = Join-Path $workspace "src-tauri\resources\jarvis-core"
 $sourceDirectory = Join-Path $workspace "src"

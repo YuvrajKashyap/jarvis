@@ -1,11 +1,12 @@
 import sys
 import time
 from pathlib import Path
+from shutil import which
 
 import pytest
 
 from jarvis.agency.terminal import TerminalCommand
-from jarvis.platform.process import LocalCommandRunner
+from jarvis.platform.process import BoundedProcessRunner, LocalCommandRunner
 
 
 async def test_command_runner_bounds_combined_output(tmp_path: Path) -> None:
@@ -69,3 +70,21 @@ async def test_command_runner_terminates_timed_out_process(tmp_path: Path) -> No
 
     assert result.timed_out is True
     assert time.perf_counter() - started < 5
+
+
+@pytest.mark.skipif(which("winapp") is None, reason="Windows App CLI is not installed")
+async def test_bounded_runner_supports_windows_execution_aliases(tmp_path: Path) -> None:
+    executable = which("winapp")
+    assert executable is not None
+
+    result = await BoundedProcessRunner().run(
+        Path(executable),
+        ("--version",),
+        cwd=tmp_path,
+        environment={"WINAPP_CLI_TELEMETRY_OPTOUT": "1"},
+        timeout_seconds=10,
+        output_limit_bytes=32_768,
+    )
+
+    assert result.exit_code == 0
+    assert "0.5.0" in result.stdout

@@ -70,6 +70,18 @@ def test_message_ids_are_immutable(tmp_path) -> None:
         history.append(message(content="Different content"))
 
 
+def test_explicit_awareness_transcripts_have_a_distinct_ambient_role(tmp_path) -> None:
+    history = repository(tmp_path)
+    ambient = message(
+        role=ConversationRole.AMBIENT,
+        content="The team agreed to ship the local prototype on Friday.",
+    )
+
+    history.append(ambient)
+
+    assert history.recent(limit=10) == [ambient]
+
+
 @pytest.mark.parametrize("limit", [0, 501])
 def test_history_bounds_queries(tmp_path, limit: int) -> None:
     history = repository(tmp_path)

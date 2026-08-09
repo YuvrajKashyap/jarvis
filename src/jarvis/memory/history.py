@@ -20,6 +20,7 @@ class ConversationRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
+    AMBIENT = "ambient"
 
 
 class ConversationMessage(BaseModel):

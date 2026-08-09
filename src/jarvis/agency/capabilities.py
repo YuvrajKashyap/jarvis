@@ -50,6 +50,7 @@ class CapabilityContext:
     invocation_id: UUID
     device_id: str
     requested_at: datetime
+    source_event_id: UUID | None = None
 
 
 class Capability(Protocol):
@@ -113,6 +114,7 @@ class ActionCoordinator(Protocol):
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        source_event_id: UUID | None = None,
         standing_rule_id: str | None = None,
         scheduled: bool = False,
     ) -> CoordinatedExecution: ...
@@ -136,6 +138,7 @@ class _PendingInvocation:
     invocation: Invocation
     device_id: str
     scheduled: bool
+    source_event_id: UUID | None
 
 
 class CapabilityRegistry:
@@ -190,6 +193,7 @@ class InvocationEngine:
         authorization: AuthorizationContext,
         device_id: str,
         now: datetime,
+        source_event_id: UUID | None = None,
     ) -> ExecutionResult:
         capability = self._registry.get(invocation.capability)
         if capability is None:
@@ -253,6 +257,7 @@ class InvocationEngine:
             invocation_id=invocation.invocation_id,
             device_id=device_id,
             requested_at=invocation.requested_at,
+            source_event_id=source_event_id,
         )
         try:
             raw_output = await asyncio.wait_for(
@@ -348,6 +353,7 @@ class InvocationCoordinator:
         device_id: str,
         requested_at: datetime,
         direct_request: bool,
+        source_event_id: UUID | None = None,
         standing_rule_id: str | None = None,
         scheduled: bool = False,
     ) -> CoordinatedExecution:
@@ -366,6 +372,7 @@ class InvocationCoordinator:
             ),
             device_id=device_id,
             now=requested_at,
+            source_event_id=source_event_id,
         )
         if result.status is not ExecutionStatus.AWAITING_APPROVAL or result.approval_id is None:
             return CoordinatedExecution(result=result)
@@ -390,6 +397,7 @@ class InvocationCoordinator:
             invocation=invocation,
             device_id=device_id,
             scheduled=scheduled,
+            source_event_id=source_event_id,
         )
         return CoordinatedExecution(result=result, approval=prompt)
 
@@ -419,6 +427,7 @@ class InvocationCoordinator:
                 authorization=AuthorizationContext(approval_id=approval_id),
                 device_id=pending.device_id,
                 now=now,
+                source_event_id=pending.source_event_id,
             )
         finally:
             self._pending.pop(approval_id, None)

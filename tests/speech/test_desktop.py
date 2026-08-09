@@ -2,8 +2,13 @@ import asyncio
 from collections.abc import Callable
 
 from jarvis.speech.audio import AudioFormat, AudioRingBuffer
-from jarvis.speech.desktop import DesktopSpeechService, DesktopTranscript, DesktopWake
-from jarvis.speech.engine import SpeechCoordinator, SpeechSettings
+from jarvis.speech.desktop import (
+    DesktopAmbientTranscript,
+    DesktopSpeechService,
+    DesktopTranscript,
+    DesktopWake,
+)
+from jarvis.speech.engine import AwarenessMode, SpeechCoordinator, SpeechSettings
 
 FORMAT = AudioFormat(sample_rate=16_000, channels=1, sample_width_bytes=2)
 FRAME = b"\x00\x00" * 512
@@ -78,3 +83,32 @@ async def test_desktop_service_turns_microphone_frames_into_wake_and_transcript(
     assert isinstance(transcript, DesktopTranscript)
     assert transcript.text == "What am I looking at?"
     assert microphone.stopped is True
+
+
+async def test_desktop_service_marks_awareness_transcripts_as_ambient() -> None:
+    microphone = FakeMicrophone()
+    wake_word = FakeWake()
+    wake_word.should_wake = False
+    coordinator = SpeechCoordinator(
+        buffer=AudioRingBuffer(audio_format=FORMAT, duration_seconds=120),
+        wake_word=wake_word,
+        vad=FakeVad(),
+        playback=FakePlayback(),
+        settings=SpeechSettings(frame_duration_ms=32, end_of_speech_silence_ms=64),
+    )
+    service = DesktopSpeechService(
+        microphone=microphone,
+        coordinator=coordinator,
+        transcriber=FakeTranscriber(),
+    )
+    await service.start()
+    await service.set_mode(AwarenessMode.MEETING)
+
+    microphone.push(b"\x10\x00" * 512)
+    microphone.push(FRAME)
+    microphone.push(FRAME)
+    transcript = await asyncio.wait_for(service.next_event(), timeout=1)
+    await service.stop()
+
+    assert isinstance(transcript, DesktopAmbientTranscript)
+    assert transcript.text == "What am I looking at?"

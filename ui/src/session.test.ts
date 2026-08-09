@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { ServerEvent } from "./generated";
-import { initialView, reduceServerEvent } from "./session";
+import {
+  initialView,
+  isReminderNotification,
+  reduceServerEvent,
+  shouldRevealDesktopOverlay,
+} from "./session";
 
 const envelope = {
   version: 1 as const,
@@ -13,6 +18,29 @@ const envelope = {
 };
 
 describe("reduceServerEvent", () => {
+  it("reveals the desktop overlay for proactive results and active conversation state", () => {
+    const reminder: ServerEvent = {
+      ...envelope,
+      type: "capability_result",
+      payload: {
+        action_id: "019fd977-1d96-7892-950c-6afbb71f7cf6",
+        capability: "notifications.remind",
+        status: "succeeded",
+        message: "Leave for practice now.",
+        undo_available: false,
+      },
+    };
+    const idle: ServerEvent = {
+      ...envelope,
+      type: "state_changed",
+      payload: { state: "idle", detail: null },
+    };
+
+    expect(shouldRevealDesktopOverlay(reminder)).toBe(true);
+    expect(isReminderNotification(reminder)).toBe(true);
+    expect(shouldRevealDesktopOverlay(idle)).toBe(false);
+    expect(isReminderNotification(idle)).toBe(false);
+  });
   it("projects authoritative state changes into the overlay", () => {
     const event: ServerEvent = {
       ...envelope,

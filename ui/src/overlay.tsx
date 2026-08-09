@@ -12,6 +12,8 @@ export type OverlayView = {
     | "speaking"
     | "private"
     | "meeting"
+    | "lecture"
+    | "ambient"
     | "unavailable";
   transcript: Array<{
     id: string;
@@ -230,6 +232,8 @@ const STATE_LABELS: Record<OverlayView["state"], string> = {
   speaking: "Speaking",
   private: "Private mode",
   meeting: "Meeting mode",
+  lecture: "Lecture mode",
+  ambient: "Ambient memory mode",
   unavailable: "Unavailable",
 };
 

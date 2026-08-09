@@ -317,7 +317,9 @@
           "enum": [
             "normal",
             "private",
-            "meeting"
+            "meeting",
+            "lecture",
+            "ambient"
           ],
           "title": "Mode",
           "type": "string"

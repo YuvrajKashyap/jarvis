@@ -76,6 +76,21 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
   }
 }
 
+export function shouldRevealDesktopOverlay(event: ServerEvent): boolean {
+  if (event.type === "state_changed") return event.payload.state !== "idle";
+  return event.type === "capability_result" || event.type === "approval_required";
+}
+
+export function isReminderNotification(
+  event: ServerEvent,
+): event is Extract<ServerEvent, { type: "capability_result" }> {
+  return (
+    event.type === "capability_result" &&
+    event.payload.capability === "notifications.remind" &&
+    event.payload.status === "succeeded"
+  );
+}
+
 function mergeAssistantText(
   transcript: OverlayView["transcript"],
   event: Extract<ServerEvent, { type: "assistant_text" }>,

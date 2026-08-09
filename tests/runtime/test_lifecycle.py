@@ -1,4 +1,5 @@
 from jarvis.runtime.lifecycle import RuntimeLifecycle
+from jarvis.runtime.resources import ResourcePressure
 
 
 class FakeResidency:
@@ -43,6 +44,12 @@ class FailingResidency(FakeResidency):
     async def ensure_resident(self, model: str) -> None:
         self.events.append(f"load:{model}")
         raise RuntimeError("model prewarm failed")
+
+
+class PressuredResidency(FakeResidency):
+    async def ensure_resident(self, model: str) -> None:
+        self.events.append(f"load:{model}")
+        raise ResourcePressure("available_memory")
 
 
 async def test_runtime_lifecycle_prewarms_primary_model_and_releases_it() -> None:
@@ -149,4 +156,23 @@ async def test_runtime_lifecycle_releases_resources_when_prewarm_fails() -> None
         "load:qwen3.5:4b-q4_K_M",
         "unload",
         "close:sqlite",
+    ]
+
+
+async def test_runtime_stays_available_when_only_model_prewarm_is_resource_blocked() -> None:
+    residency = PressuredResidency()
+    lifecycle = RuntimeLifecycle(
+        models=residency,
+        primary_model="qwen3.5:4b-q4_K_M",
+        components=(FakeComponent(residency.events),),
+    )
+
+    await lifecycle.start()
+    await lifecycle.stop()
+
+    assert residency.events == [
+        "load:qwen3.5:4b-q4_K_M",
+        "start:scheduler",
+        "stop:scheduler",
+        "unload",
     ]

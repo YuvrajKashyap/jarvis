@@ -107,6 +107,7 @@ def test_sounddevice_microphone_emits_only_complete_512_sample_frames() -> None:
 
     class FakeStream:
         def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
             self.callback = kwargs["callback"]
             self.started = False
             self.stopped = False
@@ -123,7 +124,7 @@ def test_sounddevice_microphone_emits_only_complete_512_sample_frames() -> None:
             self.closed = True
 
     frames: list[bytes] = []
-    microphone = SoundDeviceMicrophone(stream_factory=FakeStream)
+    microphone = SoundDeviceMicrophone(stream_factory=FakeStream, device="Studio microphone")
     microphone.start(frames.append)
     stream = cast(FakeStream, streams[0])
     callback = cast(Callable[[object, int, object, object], None], stream.callback)
@@ -132,4 +133,5 @@ def test_sounddevice_microphone_emits_only_complete_512_sample_frames() -> None:
     microphone.stop()
 
     assert frames == [b"\x01\x00" * 512]
+    assert stream.kwargs["device"] == "Studio microphone"
     assert stream.started and stream.stopped and stream.closed

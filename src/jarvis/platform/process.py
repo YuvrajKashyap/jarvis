@@ -7,8 +7,62 @@ from contextlib import suppress
 from pathlib import Path
 
 import psutil
+from pydantic import BaseModel, ConfigDict
 
 from jarvis.agency.terminal import TerminalCommand, TerminalResult
+
+
+class BoundedProcessResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    exit_code: int | None
+    stdout: str
+    stderr: str
+    timed_out: bool
+    truncated: bool
+
+
+class BoundedProcessRunner:
+    """Executes one explicit binary without a shell under hard resource bounds."""
+
+    async def run(
+        self,
+        executable: Path,
+        arguments: tuple[str, ...],
+        *,
+        cwd: Path,
+        environment: dict[str, str],
+        timeout_seconds: float,
+        output_limit_bytes: int,
+    ) -> BoundedProcessResult:
+        if len(arguments) > 64:
+            raise ValueError("bounded process accepts at most 64 arguments")
+        if not 1 <= timeout_seconds <= 120:
+            raise ValueError("bounded process timeout is invalid")
+        if not 1_024 <= output_limit_bytes <= 1_048_576:
+            raise ValueError("bounded process output limit is invalid")
+        if any("\x00" in value or "\r" in value or "\n" in value for value in arguments):
+            raise ValueError("bounded process arguments cannot contain control separators")
+        resolved_executable = await asyncio.to_thread(lambda: Path(os.path.abspath(executable)))
+        executable_parent = await asyncio.to_thread(
+            resolved_executable.parent.resolve,
+            strict=True,
+        )
+        if not executable_parent.is_dir():
+            raise ValueError("bounded process executable directory is invalid")
+        resolved_cwd = await asyncio.to_thread(cwd.resolve, strict=True)
+        if not resolved_cwd.is_dir():
+            raise ValueError("bounded process working directory must be a directory")
+        process_environment = os.environ.copy()
+        process_environment.update(environment)
+        return await _run_bounded_process(
+            resolved_executable,
+            arguments,
+            cwd=resolved_cwd,
+            environment=process_environment,
+            timeout_seconds=timeout_seconds,
+            output_limit_bytes=output_limit_bytes,
+        )
 
 
 class _OutputBudget:
@@ -55,41 +109,62 @@ class LocalCommandRunner:
         if executable is None:
             raise ValueError("terminal executable is not installed or allowlisted")
 
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-        process = await asyncio.create_subprocess_exec(
-            str(executable),
-            *command.arguments,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            creationflags=creationflags,
+        result = await _run_bounded_process(
+            executable,
+            command.arguments,
+            cwd=cwd,
+            environment=os.environ.copy(),
+            timeout_seconds=command.timeout_seconds,
+            output_limit_bytes=command.output_limit_bytes,
         )
-        assert process.stdout is not None and process.stderr is not None
-        budget = _OutputBudget(command.output_limit_bytes)
-        stdout_task = asyncio.create_task(_capture(process.stdout, budget))
-        stderr_task = asyncio.create_task(_capture(process.stderr, budget))
-        timed_out = False
-        try:
-            await asyncio.wait_for(process.wait(), timeout=command.timeout_seconds)
-        except TimeoutError:
-            timed_out = True
-            await _terminate_tree(process.pid)
-            await process.wait()
-        except asyncio.CancelledError:
-            await _terminate_tree(process.pid)
-            await process.wait()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            raise
-        stdout_bytes, stderr_bytes = await asyncio.gather(stdout_task, stderr_task)
-        return TerminalResult(
-            exit_code=None if timed_out else process.returncode,
-            stdout=stdout_bytes.decode("utf-8", errors="replace"),
-            stderr=stderr_bytes.decode("utf-8", errors="replace"),
-            timed_out=timed_out,
-            truncated=budget.truncated,
-        )
+        return TerminalResult(**result.model_dump())
+
+
+async def _run_bounded_process(
+    executable: Path,
+    arguments: tuple[str, ...],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+    output_limit_bytes: int,
+) -> BoundedProcessResult:
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    process = await asyncio.create_subprocess_exec(
+        str(executable),
+        *arguments,
+        cwd=str(cwd),
+        env=environment,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    assert process.stdout is not None and process.stderr is not None
+    budget = _OutputBudget(output_limit_bytes)
+    stdout_task = asyncio.create_task(_capture(process.stdout, budget))
+    stderr_task = asyncio.create_task(_capture(process.stderr, budget))
+    timed_out = False
+    try:
+        await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+    except TimeoutError:
+        timed_out = True
+        await _terminate_tree(process.pid)
+        await process.wait()
+    except asyncio.CancelledError:
+        await _terminate_tree(process.pid)
+        await process.wait()
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+        raise
+    stdout_bytes, stderr_bytes = await asyncio.gather(stdout_task, stderr_task)
+    return BoundedProcessResult(
+        exit_code=None if timed_out else process.returncode,
+        stdout=stdout_bytes.decode("utf-8", errors="replace"),
+        stderr=stderr_bytes.decode("utf-8", errors="replace"),
+        timed_out=timed_out,
+        truncated=budget.truncated,
+    )
 
 
 async def _capture(stream: asyncio.StreamReader, budget: _OutputBudget) -> bytes:

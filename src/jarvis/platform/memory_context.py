@@ -87,7 +87,11 @@ class LocalMemoryContext:
             bounded_history.append(
                 ChatMessage(
                     role=_chat_role(message.role),
-                    content=message.content,
+                    content=(
+                        f"[Ambient awareness transcript] {message.content}"
+                        if message.role is ConversationRole.AMBIENT
+                        else message.content
+                    ),
                 )
             )
             available -= len(message.content)
@@ -100,4 +104,6 @@ def _chat_role(role: ConversationRole) -> Literal["user", "assistant", "tool"]:
         return "user"
     if role is ConversationRole.ASSISTANT:
         return "assistant"
+    if role is ConversationRole.AMBIENT:
+        return "user"
     return "tool"

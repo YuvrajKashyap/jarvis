@@ -60,7 +60,7 @@ export type Sequence5 = number;
 export type Timestamp5 = string;
 export type Type5 = "mode_change";
 export type DeviceId4 = string;
-export type Mode = "normal" | "private" | "meeting";
+export type Mode = "normal" | "private" | "meeting" | "lecture" | "ambient";
 
 export interface Activate {
   version: Version;

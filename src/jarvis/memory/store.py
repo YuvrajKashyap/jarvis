@@ -198,6 +198,20 @@ class MemoryRepository:
             row = session.get(MemoryFactRow, str(fact_id))
             return None if row is None else _fact_from_row(row)
 
+    def find(self, *, category: str, subject: str) -> MemoryFact | None:
+        category_key = category.strip().casefold()
+        subject_key = subject.strip().casefold()
+        if not category_key or not subject_key:
+            raise ValueError("memory category and subject cannot be empty")
+        with Session(self._sqlite.engine) as session:
+            row = session.exec(
+                select(MemoryFactRow).where(
+                    MemoryFactRow.category_key == category_key,
+                    MemoryFactRow.subject_key == subject_key,
+                )
+            ).one_or_none()
+            return None if row is None else _fact_from_row(row)
+
     def list_all(self, *, limit: int = 10_000) -> list[MemoryFact]:
         if limit < 1 or limit > 10_000:
             raise ValueError("memory list limit must be between 1 and 10000")
@@ -222,6 +236,15 @@ class MemoryRepository:
                 )
                 for row in rows
             ]
+
+    def delete_conflict(self, conflict_id: UUID) -> bool:
+        with self._sqlite._write_lock, Session(self._sqlite.engine) as session:
+            row = session.get(MemoryConflictRow, str(conflict_id))
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
 
     def correct(
         self,

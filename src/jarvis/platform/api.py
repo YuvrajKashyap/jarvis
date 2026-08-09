@@ -75,15 +75,19 @@ from jarvis.runtime.assistant import (
     TurnCancelled,
     TurnComplete,
 )
+from jarvis.runtime.awareness import parse_awareness_command
 from jarvis.runtime.conversation import ListeningMode, RuntimeCoordinator, RuntimeSnapshot
 from jarvis.runtime.lifecycle import ApplicationLifecycle
+from jarvis.runtime.resources import ResourcePressure
 from jarvis.speech.desktop import (
+    DesktopAmbientTranscript,
     DesktopBargeIn,
     DesktopSpeechError,
     DesktopSpeechSource,
     DesktopTranscript,
     DesktopWake,
 )
+from jarvis.speech.engine import AwarenessMode
 from jarvis.speech.output import (
     SpeechOutputFactory,
     SpeechOutputSession,
@@ -455,6 +459,7 @@ def create_app(
         send_lock = asyncio.Lock()
         generation_task: asyncio.Task[None] | None = None
         pending_approvals: dict[UUID, PendingApprovalTurn] = {}
+        ambient_session_id: UUID | None = None
         connection_session = uuid4()
         connection_turn = uuid4()
 
@@ -488,8 +493,62 @@ def create_app(
                 await generation_task
 
         async def start_text_turn(source_event: SubmitText) -> None:
-            nonlocal generation_task
+            nonlocal ambient_session_id, generation_task
             await cancel_generation()
+            awareness = parse_awareness_command(source_event.payload.text)
+            if awareness is not None:
+                await emit(
+                    lambda current: _transcript_event(
+                        source_event,
+                        sequence=current,
+                    )
+                )
+                runtime.set_mode(awareness.mode)
+                if desktop_speech is not None:
+                    await desktop_speech.set_mode(AwarenessMode(awareness.mode.value))
+                ambient_session_id = (
+                    uuid4()
+                    if awareness.mode
+                    in {
+                        ListeningMode.MEETING,
+                        ListeningMode.LECTURE,
+                        ListeningMode.AMBIENT,
+                    }
+                    else None
+                )
+                await emit(
+                    lambda current: _assistant_text_event(
+                        source_event,
+                        text=awareness.acknowledgement,
+                        is_final=False,
+                        sequence=current,
+                    )
+                )
+                await emit(
+                    lambda current: _assistant_text_event(
+                        source_event,
+                        text="",
+                        is_final=True,
+                        sequence=current,
+                    )
+                )
+                if speech_output is not None:
+                    awareness_speech = speech_output.open(
+                        device_id=source_event.payload.device_id,
+                        send_phone_pcm=send_phone_pcm,
+                    )
+                    await awareness_speech.push(awareness.acknowledgement)
+                    await awareness_speech.finish()
+                completed = runtime.complete_turn()
+                await emit(
+                    lambda current: _state_event(
+                        completed,
+                        session_id=source_event.session_id,
+                        turn_id=source_event.turn_id,
+                        sequence=current,
+                    )
+                )
+                return
             snapshot = _dispatch(runtime, source_event)
             persist_turn = history is not None and snapshot.mode is not ListeningMode.PRIVATE
             await emit(
@@ -592,6 +651,52 @@ def create_app(
                             ),
                         )
                     )
+                elif isinstance(speech_event, DesktopAmbientTranscript):
+                    snapshot = runtime.snapshot()
+                    if snapshot.mode not in {
+                        ListeningMode.MEETING,
+                        ListeningMode.LECTURE,
+                        ListeningMode.AMBIENT,
+                    }:
+                        continue
+                    session_id = ambient_session_id or uuid4()
+                    turn_id = uuid4()
+                    event_id = uuid4()
+                    if history is not None:
+                        await asyncio.to_thread(
+                            history.append,
+                            ConversationMessage(
+                                message_id=event_id,
+                                source_event_id=event_id,
+                                session_id=session_id,
+                                turn_id=turn_id,
+                                role=ConversationRole.AMBIENT,
+                                content=speech_event.text,
+                                device_id="desktop",
+                                created_at=speech_event.occurred_at,
+                            ),
+                        )
+                    ambient_text = speech_event.text
+                    ambient_occurred_at = speech_event.occurred_at
+
+                    def build_ambient_transcript(
+                        current: int,
+                        session: UUID = session_id,
+                        turn: UUID = turn_id,
+                        event: UUID = event_id,
+                        text: str = ambient_text,
+                        occurred: datetime = ambient_occurred_at,
+                    ) -> ServerEvent:
+                        return _ambient_transcript_event(
+                            text=text,
+                            occurred_at=occurred,
+                            event_id=event,
+                            session_id=session,
+                            turn_id=turn,
+                            sequence=current,
+                        )
+
+                    await emit(build_ambient_transcript)
                 elif isinstance(speech_event, DesktopBargeIn):
                     snapshot = runtime.snapshot()
                     if snapshot.phase.value == "idle" or snapshot.active_device_id != "desktop":
@@ -873,7 +978,11 @@ def create_app(
                         if speech_input is not None:
                             await speech_input.reset(identity.device_id)
                     if isinstance(client_event, ModeChange) and desktop_speech is not None:
-                        await desktop_speech.set_private(client_event.payload.mode == "private")
+                        await desktop_speech.set_mode(AwarenessMode(client_event.payload.mode))
+                        if client_event.payload.mode in {"meeting", "lecture", "ambient"}:
+                            ambient_session_id = ambient_session_id or uuid4()
+                        else:
+                            ambient_session_id = None
                     snapshot = _dispatch(runtime, client_event)
                     await emit(
                         lambda current, current_snapshot=snapshot, source_event=client_event: (
@@ -1180,6 +1289,7 @@ async def _stream_assistant(
                     device_id=client_event.payload.device_id,
                     requested_at=datetime.now(UTC),
                     direct_request=False,
+                    source_event_id=client_event.event_id,
                 )
                 if coordinated.approval is not None:
                     approval_prompt = coordinated.approval
@@ -1286,6 +1396,18 @@ async def _stream_assistant(
         return
     except asyncio.CancelledError:
         raise
+    except ResourcePressure as error:
+        condition = "memory" if error.reason == "available_memory" else "temperature"
+        await emit_error(
+            "resource_pressure",
+            (
+                f"JARVIS is online, but current {condition} pressure makes loading the local "
+                "model unsafe. I will not close your applications or force the model to load; "
+                "try again when the pressure drops."
+            ),
+            recoverable=True,
+        )
+        await _complete_active_turn(runtime, client_event, emit)
     except (OSError, RuntimeError):
         await emit_error(
             "generation_failed",
@@ -1331,6 +1453,32 @@ def _transcript_event(client_event: SubmitText, *, sequence: int) -> Transcript:
             speaker="user",
             is_final=True,
             device_id=client_event.payload.device_id,
+        ),
+    )
+
+
+def _ambient_transcript_event(
+    *,
+    text: str,
+    occurred_at: datetime,
+    event_id: UUID,
+    session_id: UUID,
+    turn_id: UUID,
+    sequence: int,
+) -> Transcript:
+    return Transcript(
+        version=1,
+        event_id=event_id,
+        session_id=session_id,
+        turn_id=turn_id,
+        sequence=sequence,
+        timestamp=occurred_at,
+        type="transcript",
+        payload=TranscriptPayload(
+            text=text,
+            speaker="ambient",
+            is_final=True,
+            device_id="desktop",
         ),
     )
 
@@ -1474,7 +1622,7 @@ def _capability_result_event(
 ) -> CapabilityResult:
     if result.status is ExecutionStatus.AWAITING_APPROVAL:
         raise ValueError("an awaiting result cannot be emitted as completed")
-    message = result.reason or f"{capability} completed."
+    message = _capability_result_message(result, fallback=f"{capability} completed.")
     return CapabilityResult(
         version=1,
         event_id=uuid4(),
@@ -1515,10 +1663,23 @@ def _scheduled_capability_result_event(
             action_id=result.invocation_id,
             capability=capability,
             status=result.status.value,
-            message=result.reason or f"Scheduled {capability} completed.",
+            message=_capability_result_message(
+                result,
+                fallback=f"Scheduled {capability} completed.",
+            ),
             undo_available=bool(result.output and result.output.get("undo_reference")),
         ),
     )
+
+
+def _capability_result_message(result: ExecutionResult, *, fallback: str) -> str:
+    if result.reason:
+        return result.reason
+    if result.output is not None:
+        message = result.output.get("message")
+        if isinstance(message, str) and 0 < len(message) <= 4_000:
+            return message
+    return fallback
 
 
 def _tool_result_context(capability: str, result: ExecutionResult) -> ChatMessage:

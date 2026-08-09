@@ -1,16 +1,184 @@
 import ctypes
+import json
+from collections.abc import Callable
 from ctypes import wintypes
 from datetime import UTC, datetime
 from io import BytesIO
+from pathlib import Path
+from typing import Protocol
 
 import psutil
 from PIL import ImageGrab
 
+from jarvis.agency.windows import WindowActionResult, WindowElement, WindowSnapshot
 from jarvis.perception.context import (
     ActiveWindowSnapshot,
     ScreenSnapshot,
     SystemHealthSnapshot,
 )
+from jarvis.platform.process import BoundedProcessResult
+
+MAX_AUTOMATION_ELEMENTS = 256
+
+
+class ExecutableRunner(Protocol):
+    async def run(
+        self,
+        executable: Path,
+        arguments: tuple[str, ...],
+        *,
+        cwd: Path,
+        environment: dict[str, str],
+        timeout_seconds: float,
+        output_limit_bytes: int,
+    ) -> BoundedProcessResult: ...
+
+
+class WinAppAutomation:
+    """Provides bounded UIA-pattern access to the foreground Windows application."""
+
+    def __init__(
+        self,
+        *,
+        executable: Path,
+        runner: ExecutableRunner,
+        window_handle: Callable[[], int],
+        working_directory: Path,
+    ) -> None:
+        self._executable = executable
+        self._runner = runner
+        self._window_handle = window_handle
+        self._working_directory = working_directory
+
+    async def inspect_active(self, *, depth: int, interactive_only: bool) -> WindowSnapshot:
+        if depth < 1 or depth > 6:
+            raise ValueError("Windows inspection depth must be between one and six")
+        handle = self._active_handle()
+        arguments = [
+            "ui",
+            "inspect",
+            "--window",
+            str(handle),
+            "--json",
+            "--depth",
+            str(depth),
+        ]
+        if interactive_only:
+            arguments.append("--interactive")
+        arguments.extend(("--hide-disabled", "--hide-offscreen"))
+        payload = await self._execute(tuple(arguments))
+        windows = payload.get("windows")
+        if not isinstance(windows, list) or len(windows) != 1:
+            raise RuntimeError("Windows UI Automation did not return the active window")
+        window = windows[0]
+        if not isinstance(window, dict) or int(window.get("hwnd", 0)) != handle:
+            raise RuntimeError("Windows UI Automation returned a stale active window")
+        raw_elements = window.get("elements", [])
+        if not isinstance(raw_elements, list):
+            raise RuntimeError("Windows UI Automation returned malformed elements")
+        remaining = [MAX_AUTOMATION_ELEMENTS]
+        elements = tuple(_parse_element(item, remaining) for item in raw_elements)
+        return WindowSnapshot(
+            window_handle=handle,
+            title=str(window.get("title", "")),
+            captured_at=datetime.now(UTC),
+            elements=elements,
+        )
+
+    async def invoke_active(self, selector: str) -> WindowActionResult:
+        return await self._act("invoke", selector)
+
+    async def set_active_value(self, selector: str, value: str) -> WindowActionResult:
+        _require_operand(value)
+        return await self._act("set-value", selector, value)
+
+    async def _act(
+        self,
+        command: str,
+        selector: str,
+        value: str | None = None,
+    ) -> WindowActionResult:
+        _require_operand(selector)
+        handle = self._active_handle()
+        arguments = ["ui", command, selector]
+        if value is not None:
+            arguments.append(value)
+        arguments.extend(("--window", str(handle), "--json"))
+        payload = await self._execute(tuple(arguments))
+        if payload.get("success") is False:
+            raise RuntimeError(str(payload.get("message", "Windows UI Automation action failed")))
+        detail = payload.get("message", payload.get("detail", "Completed through UI Automation"))
+        return WindowActionResult(
+            window_handle=handle,
+            operation="invoke" if command == "invoke" else "set_value",
+            selector=selector,
+            detail=str(detail)[:4_096],
+            completed_at=datetime.now(UTC),
+        )
+
+    async def _execute(self, arguments: tuple[str, ...]) -> dict[str, object]:
+        result = await self._runner.run(
+            self._executable,
+            arguments,
+            cwd=self._working_directory,
+            environment={"WINAPP_CLI_TELEMETRY_OPTOUT": "1"},
+            timeout_seconds=10,
+            output_limit_bytes=262_144,
+        )
+        if result.timed_out:
+            raise RuntimeError("Windows UI Automation timed out")
+        if result.truncated:
+            raise RuntimeError("Windows UI Automation exceeded its output limit")
+        if result.exit_code != 0:
+            detail = (result.stderr or result.stdout or "Windows UI Automation failed")[:4_096]
+            raise RuntimeError(detail)
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Windows UI Automation returned malformed JSON") from error
+        if not isinstance(payload, dict):
+            raise RuntimeError("Windows UI Automation returned a non-object result")
+        return payload
+
+    def _active_handle(self) -> int:
+        handle = self._window_handle()
+        if handle <= 0:
+            raise RuntimeError("there is no active Windows application")
+        return handle
+
+
+def foreground_window_handle() -> int:
+    return int(ctypes.windll.user32.GetForegroundWindow())
+
+
+def _parse_element(raw: object, remaining: list[int]) -> WindowElement:
+    if not isinstance(raw, dict):
+        raise RuntimeError("Windows UI Automation returned a malformed element")
+    if remaining[0] <= 0:
+        raise RuntimeError("Windows UI Automation exceeded the element limit")
+    remaining[0] -= 1
+    raw_children = raw.get("children", [])
+    if not isinstance(raw_children, list):
+        raise RuntimeError("Windows UI Automation returned malformed child elements")
+    children = tuple(_parse_element(child, remaining) for child in raw_children)
+    selector = raw.get("selector")
+    return WindowElement(
+        selector=selector if isinstance(selector, str) else None,
+        control_type=str(raw.get("type", "Unknown")),
+        name=str(raw.get("name", "")),
+        class_name=str(raw.get("className", "")),
+        enabled=bool(raw.get("isEnabled", False)),
+        offscreen=bool(raw.get("isOffscreen", False)),
+        invokable=bool(raw.get("isInvokable", False)),
+        children=children,
+    )
+
+
+def _require_operand(value: str) -> None:
+    if not value or len(value) > 16_000:
+        raise ValueError("Windows automation operand length is invalid")
+    if "\x00" in value or "\r" in value or "\n" in value:
+        raise ValueError("Windows automation operands cannot contain control separators")
 
 
 class WindowsPerception:

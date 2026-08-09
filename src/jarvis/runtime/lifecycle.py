@@ -1,6 +1,8 @@
 import asyncio
 from typing import Protocol
 
+from jarvis.runtime.resources import ResourcePressure
+
 
 class ModelResidency(Protocol):
     async def ensure_resident(self, model: str) -> object: ...
@@ -52,6 +54,10 @@ class RuntimeLifecycle:
             if self._models is not None and self._primary_model is not None:
                 try:
                     await self._models.ensure_resident(self._primary_model)
+                except ResourcePressure:
+                    # Keep memory, schedules, transport, and diagnostics available. The next
+                    # foreground turn retries residency and reports current resource pressure.
+                    pass
                 except BaseException:
                     await self._release()
                     raise

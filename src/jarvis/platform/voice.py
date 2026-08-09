@@ -1,6 +1,7 @@
 import asyncio
 import threading
 from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -33,14 +34,21 @@ class SoundDeviceBackend(Protocol):
         samplerate: int,
         *,
         blocking: bool,
+        device: int | str | None,
     ) -> None: ...
 
     def stop(self) -> None: ...
 
 
 class SoundDeviceSpeaker:
-    def __init__(self, *, backend: SoundDeviceBackend | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        backend: SoundDeviceBackend | None = None,
+        device: int | str | None = None,
+    ) -> None:
         self._configured_backend = backend
+        self._device = device
         self._loaded_backend: SoundDeviceBackend | None = None
 
     async def play(self, audio: SynthesizedAudio) -> None:
@@ -54,7 +62,12 @@ class SoundDeviceSpeaker:
 
     def _play(self, audio: SynthesizedAudio) -> None:
         samples = np.frombuffer(audio.pcm_s16le, dtype="<i2").astype(np.float32) / 32_768.0
-        self._backend().play(samples, audio.sample_rate, blocking=True)
+        self._backend().play(
+            samples,
+            audio.sample_rate,
+            blocking=True,
+            device=self._device,
+        )
 
     def _backend(self) -> SoundDeviceBackend:
         if self._configured_backend is not None:
@@ -110,9 +123,9 @@ class ChatterboxTurboSynthesizer:
 
 
 def _load_chatterbox(device: str) -> ChatterboxModel:
-    from chatterbox.tts_turbo import ChatterboxTurboTTS
-
-    return cast(ChatterboxModel, ChatterboxTurboTTS.from_pretrained(device=device))
+    chatterbox = import_module("chatterbox.tts_turbo")
+    model_type = chatterbox.ChatterboxTurboTTS
+    return cast(ChatterboxModel, model_type.from_pretrained(device=device))
 
 
 def _as_float_waveform(value: object) -> NDArray[np.float32]:
