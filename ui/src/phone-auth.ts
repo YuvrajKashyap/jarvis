@@ -20,6 +20,12 @@ const STORE_NAME = "credentials";
 
 export class UnpairedPhoneError extends Error {}
 
+export class PhoneRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`JARVIS request failed (${status}).`);
+  }
+}
+
 export function parsePairingFragment(fragment: string): PairingLink | null {
   const encoded = new URLSearchParams(fragment.replace(/^#/, "")).get("pair");
   if (!encoded) return null;
@@ -113,7 +119,7 @@ async function requestJson(url: string, body: Record<string, unknown>): Promise<
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`JARVIS request failed (${response.status}).`);
+  if (!response.ok) throw new PhoneRequestError(response.status);
   return response.json();
 }
 

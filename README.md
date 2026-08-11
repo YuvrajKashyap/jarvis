@@ -1,12 +1,34 @@
 # JARVIS
 
-JARVIS is Yuvraj's private, local-first AI control plane: an ambient desktop assistant, a secure phone companion, a persistent memory, and an approval-gated operator. The laptop is authoritative. No paid model API or cloud inference is required.
+JARVIS is a local-first personal intelligence for Windows and iPhone: an ambient desktop assistant, private phone companion, persistent memory, and approval-gated computer operator. The laptop remains authoritative, and normal operation requires no paid model API or cloud inference.
 
-The product definition lives in `project_spec.md`; the intended lived outcome lives in `NORTHSTAR.md`. Implementation details must not quietly redefine either document.
+This repository contains the product architecture and implementation. It deliberately excludes personal memory, conversations, credentials, pairing material, private voice references, screenshots, recordings, databases, logs, model weights, and machine-specific runtime state.
 
-The current local product includes the authenticated desktop/phone transport, streamed conversation runtime, deterministic permission and approval kernel, source-grounded durable memory, hybrid local retrieval, ephemeral screenshot-to-vision context, managed browser and Windows UI Automation, durable schedules and native reminders, explicit private/meeting/lecture/ambient modes, rotating backups and redacted logs, Ollama resource governance, and Windows packaging. Real-device wake-word, acoustic, thermal, selected-voice, and iPhone/Tailscale acceptance remain hardware gates rather than assumed successes.
+## What exists today
 
-## Commands
+- A transparent, movable, dynamically resizing Tauri desktop overlay with a supervised Python core.
+- A shared React interface for desktop and an installable private iPhone PWA.
+- Authenticated REST and WebSocket transport with typed, generated protocol contracts.
+- Streamed local-model conversation through Ollama with cancellation and resource governance.
+- Deterministic permissions, approvals, audit history, undo-aware capabilities, and durable schedules.
+- Source-grounded SQLite and Markdown memory with FTS5 and rebuildable local embeddings.
+- Explicit private, meeting, lecture, and ambient-memory modes with a RAM-only idle audio buffer.
+- Screen context, a managed browser, Windows UI Automation, native reminders, backups, and redacted logs.
+- Reproducible verification, benchmarking, SBOM generation, and unsigned Windows packaging.
+
+Real-device wake-word, acoustic, thermal, selected-voice, and iPhone/Tailscale acceptance remain physical hardware gates. They are not represented as passing until measured.
+
+## Architecture
+
+JARVIS is a compact modular monolith: one authoritative FastAPI/Python process, one shared React client, and a thin Rust/Tauri Windows host. Pydantic models define the protocol; TypeScript contracts are generated and checked for drift. Every capability invocation crosses the deterministic policy engine immediately before execution.
+
+The intended experience is defined in [`NORTHSTAR.md`](NORTHSTAR.md), the approved behavior in [`project_spec.md`](project_spec.md), and the implementation boundaries in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Development
+
+Prerequisites include Windows 11, Python 3.11, uv, Node.js, pnpm, stable Rust/MSVC, WebView2, and Ollama. Tailscale is required only for private phone access.
+
+### Commands
 
 ```powershell
 pnpm bootstrap   # install locked Python, JavaScript, and Rust dependencies
@@ -29,4 +51,8 @@ tests/        Contract, module, integration, and end-to-end tests
 scripts/      Reproducible bootstrap, verification, benchmark, and packaging
 ```
 
-See `ARCHITECTURE.md` for seams, ownership, and dependency rules. See `AGENTS.md` before changing code.
+## Privacy and publication boundary
+
+Runtime data belongs outside the repository. Secrets are stored in Windows Credential Manager; canonical local memory, voice references, model weights, databases, logs, generated pairing credentials, transcripts, and screenshots must never be committed. Idle ambient audio is held only in a bounded RAM buffer and continuously overwritten.
+
+The repository is public for engineering transparency and portfolio review. The software remains proprietary unless and until a separate license explicitly grants additional rights.

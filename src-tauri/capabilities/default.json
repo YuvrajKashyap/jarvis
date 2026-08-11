@@ -5,6 +5,9 @@
   "windows": ["overlay"],
   "permissions": [
     "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
     "notification:default"
   ]
 }

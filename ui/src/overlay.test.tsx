@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -69,6 +70,136 @@ describe("ConversationOverlay", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the desktop composer available after an assistant response completes", () => {
+    const onSubmit = vi.fn();
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          state: "idle",
+          transcript: [
+            { id: "1", speaker: "user", text: "Hello?", isFinal: true },
+            { id: "2", speaker: "assistant", text: "I'm here.", isFinal: true },
+          ],
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={onSubmit}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    const scope = within(rendered.container);
+    fireEvent.change(scope.getByRole("textbox", { name: "Message JARVIS" }), {
+      target: { value: "Good. What were we discussing?" },
+    });
+    fireEvent.submit(scope.getByRole("form", { name: "Message JARVIS" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("Good. What were we discussing?");
+  });
+
+  it("keeps phone pairing out of an established conversation", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          state: "idle",
+          transcript: [
+            { id: "1", speaker: "user", text: "Hello?", isFinal: true },
+            { id: "2", speaker: "assistant", text: "I'm here.", isFinal: true },
+          ],
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+        onPairPhone={vi.fn()}
+      />,
+    );
+
+    expect(
+      within(rendered.container).queryByRole("button", { name: "Pair iPhone" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the newest exchange visible as the conversation grows", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          transcript: [{ id: "1", speaker: "user", text: "First turn", isFinal: true }],
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+    const transcript = within(rendered.container).getByRole("list", {
+      name: "Conversation transcript",
+    });
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 420 });
+
+    rendered.rerender(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          transcript: [
+            { id: "1", speaker: "user", text: "First turn", isFinal: true },
+            {
+              id: "2",
+              speaker: "assistant",
+              text: "The newest response must remain visible.",
+              isFinal: true,
+            },
+          ],
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(transcript.scrollTop).toBe(420);
+  });
+
+  it("insets the desktop composer from every clipped window edge", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view()}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(within(rendered.container).getByRole("form", { name: "Message JARVIS" })).toHaveClass(
+      "message-box",
+    );
+    const stylesheet = readFileSync("ui/src/overlay.css", "utf8");
+    expect(stylesheet).toMatch(/\.message-box\s*{[^}]*margin:\s*12px 16px 16px;/s);
+  });
+
+  it("lets desktop content define the native overlay height without taking over the screen", () => {
+    const stylesheet = readFileSync("ui/src/overlay.css", "utf8");
+
+    expect(stylesheet).toMatch(/\.overlay--desktop\s*{[^}]*height:\s*auto;/s);
+    expect(stylesheet).not.toMatch(
+      /\.overlay--desktop\s*{[^}]*height:\s*calc\(100vh\s*-\s*\(var\(--surface-inset\)\s*\*\s*2\)\);/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.overlay--desktop\s+\.transcript\s*{[^}]*max-height:\s*280px;[^}]*flex:\s*0\s+1\s+auto;/s,
+    );
+  });
+
   it("makes the exact external action explicit before approval", () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
@@ -101,10 +232,41 @@ describe("ConversationOverlay", () => {
   });
 
   it("shows the explicit unavailable state on phone without another assistant", () => {
-    render(
+    const onRetryConnection = vi.fn();
+    const rendered = render(
       <ConversationOverlay
         surface="phone"
-        view={view({ connection: "unavailable", state: "unavailable" })}
+        view={view({
+          connection: "unavailable",
+          state: "unavailable",
+          detail: "This pairing code expired. Generate a new code from your laptop.",
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+        onRetryConnection={onRetryConnection}
+      />,
+    );
+
+    const scope = within(rendered.container);
+    expect(scope.getByRole("heading", { name: "JARVIS connection failed" })).toBeVisible();
+    expect(
+      scope.getByText("This pairing code expired. Generate a new code from your laptop."),
+    ).toBeVisible();
+    fireEvent.click(scope.getByRole("button", { name: "Try again" }));
+    expect(onRetryConnection).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByText(/apple intelligence|siri|fallback assistant/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an honest connection state while phone pairing is still in progress", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="phone"
+        view={view({ connection: "reconnecting", state: "idle" })}
         onApprove={vi.fn()}
         onReject={vi.fn()}
         onInterrupt={vi.fn()}
@@ -113,11 +275,28 @@ describe("ConversationOverlay", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "JARVIS unavailable" })).toBeVisible();
-    expect(screen.getByText("Your laptop host is offline or unreachable.")).toBeVisible();
-    expect(
-      screen.queryByText(/apple intelligence|siri|fallback assistant/i),
-    ).not.toBeInTheDocument();
+    const scope = within(rendered.container);
+    expect(scope.getByRole("heading", { name: "Connecting to JARVIS" })).toBeVisible();
+    expect(scope.queryByText("JARVIS unavailable")).not.toBeInTheDocument();
+  });
+
+  it("provides an obvious desktop drag affordance without turning actions into drag targets", () => {
+    const onMoveOverlay = vi.fn();
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({ state: "idle" })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+        onMoveOverlay={onMoveOverlay}
+      />,
+    );
+
+    fireEvent.pointerDown(within(rendered.container).getByRole("button", { name: "Move JARVIS" }));
+    expect(onMoveOverlay).toHaveBeenCalledOnce();
   });
 
   it("shows a content-protected one-use QR pairing card only on desktop", () => {
@@ -125,7 +304,12 @@ describe("ConversationOverlay", () => {
     render(
       <ConversationOverlay
         surface="desktop"
-        view={view({ state: "idle" })}
+        view={view({
+          state: "idle",
+          transcript: [
+            { id: "before-pairing", speaker: "assistant", text: "Previous reply", isFinal: true },
+          ],
+        })}
         pairing={{
           qrDataUrl: "data:image/png;base64,private-qr",
           expiresAt: "2026-08-08T02:05:00Z",
@@ -143,6 +327,7 @@ describe("ConversationOverlay", () => {
 
     expect(screen.getByRole("dialog", { name: "Pair iPhone" })).toBeVisible();
     expect(screen.getByRole("img", { name: "One-use iPhone pairing code" })).toBeVisible();
+    expect(screen.queryByText("Previous reply")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close pairing" }));
     expect(onClosePairing).toHaveBeenCalledOnce();
   });

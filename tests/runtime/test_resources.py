@@ -1,3 +1,4 @@
+from jarvis.platform.models import LoadedModel, ModelHealth
 from jarvis.runtime.resources import (
     ModelResidency,
     ResourceGovernor,
@@ -8,9 +9,25 @@ from jarvis.runtime.resources import (
 
 
 class FakeModels:
-    def __init__(self) -> None:
+    def __init__(self, *, resident: tuple[str, ...] = ()) -> None:
         self.loaded: list[str] = []
         self.unloaded: list[str] = []
+        self.resident = resident
+
+    async def health(self) -> ModelHealth:
+        return ModelHealth(
+            available=True,
+            version="test",
+            loaded_models=tuple(
+                LoadedModel(
+                    name=name,
+                    size_bytes=3_000_000_000,
+                    vram_bytes=3_000_000_000,
+                    context_length=4096,
+                )
+                for name in self.resident
+            ),
+        )
 
     async def load(self, model: str) -> None:
         self.loaded.append(model)
@@ -34,6 +51,10 @@ def resources(available_gib: float, *, gpu_c: int = 55) -> ResourceSnapshot:
         gpu_temperature_c=gpu_c,
         gpu_memory_used_bytes=2 * 1024**3,
     )
+
+
+def test_default_headroom_matches_the_measured_local_q4_workload() -> None:
+    assert ResourceLimits().minimum_available_memory_bytes == 1024**3
 
 
 async def test_governor_keeps_only_one_heavy_model_resident() -> None:
@@ -90,3 +111,51 @@ async def test_governor_refuses_to_load_during_thermal_pressure() -> None:
         raise AssertionError("thermal pressure must block model loading")
 
     assert models.loaded == []
+
+
+async def test_resident_model_can_keep_serving_after_available_memory_dips() -> None:
+    models = FakeModels()
+    governor = ResourceGovernor(
+        models=models,
+        probe=SequenceProbe([resources(3), resources(2), resources(0.8)]),
+        limits=ResourceLimits(minimum_available_memory_bytes=1024**3),
+    )
+
+    await governor.ensure_resident("qwen3.5:4b-q4_K_M")
+    result = await governor.ensure_resident("qwen3.5:4b-q4_K_M")
+
+    assert result is ModelResidency.ALREADY_RESIDENT
+    assert models.loaded == ["qwen3.5:4b-q4_K_M"]
+
+
+async def test_governor_recovers_an_ollama_resident_model_after_jarvis_restarts() -> None:
+    models = FakeModels(resident=("qwen3.5:4b-q4_K_M",))
+    governor = ResourceGovernor(
+        models=models,
+        probe=SequenceProbe([resources(0.6)]),
+        limits=ResourceLimits(minimum_available_memory_bytes=1024**3),
+    )
+
+    result = await governor.ensure_resident("qwen3.5:4b-q4_K_M")
+
+    assert result is ModelResidency.ALREADY_RESIDENT
+    assert governor.resident_model == "qwen3.5:4b-q4_K_M"
+    assert models.loaded == []
+
+
+async def test_resident_model_still_stops_for_thermal_pressure() -> None:
+    models = FakeModels()
+    governor = ResourceGovernor(
+        models=models,
+        probe=SequenceProbe([resources(3), resources(2), resources(0.8, gpu_c=90)]),
+        limits=ResourceLimits(maximum_gpu_temperature_c=85),
+    )
+
+    await governor.ensure_resident("qwen3.5:4b-q4_K_M")
+
+    try:
+        await governor.ensure_resident("qwen3.5:4b-q4_K_M")
+    except ResourcePressure as error:
+        assert error.reason == "gpu_temperature"
+    else:
+        raise AssertionError("thermal pressure must stop resident model use")

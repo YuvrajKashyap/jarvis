@@ -2,19 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import QRCode from "qrcode";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { createDesktopPairingOffer } from "./desktop-pairing";
 import { LiveClient } from "./live-client";
 import { ConversationOverlay } from "./overlay";
 import { PhoneMicrophone } from "./phone-audio";
-import { authenticatePhone } from "./phone-auth";
+import { authenticatePhone, PhoneRequestError, UnpairedPhoneError } from "./phone-auth";
 import { PhoneSpeaker } from "./phone-speaker";
 import {
   initialView,
   isReminderNotification,
   reduceServerEvent,
   type SessionView,
+  shouldRepositionDesktopOverlay,
   shouldRevealDesktopOverlay,
 } from "./session";
 
@@ -22,7 +23,7 @@ export function App() {
   const surface = useMemo(() => (isDesktopHost() ? "desktop" : "phone"), []);
   const [view, setView] = useState<SessionView>(() => ({
     ...initialView(),
-    connection: surface === "desktop" ? ("reconnecting" as const) : ("unavailable" as const),
+    connection: "reconnecting" as const,
   }));
   const client = useRef<LiveClient | null>(null);
   const microphone = useRef<PhoneMicrophone | null>(null);
@@ -32,6 +33,23 @@ export function App() {
     expiresAt: string | null;
     error: string | null;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.surface = surface;
+    if (surface !== "desktop") return;
+    const overlay = document.querySelector<HTMLElement>(".overlay--desktop");
+    if (!overlay) return;
+    const resizeOverlay = () => {
+      void invoke("fit_overlay", {
+        contentHeight: overlay.scrollHeight + 32,
+        animate: overlayMotionEnabled(),
+      });
+    };
+    resizeOverlay();
+    const observer = new ResizeObserver(resizeOverlay);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [surface]);
 
   useEffect(() => {
     let disposed = false;
@@ -44,9 +62,16 @@ export function App() {
         }
         if (surface === "desktop" && shouldRevealDesktopOverlay(event)) {
           const window = getCurrentWindow();
-          void window.show().then(() => {
-            if (!isReminderNotification(event)) return window.setFocus();
-          });
+          const position = shouldRepositionDesktopOverlay(event)
+            ? invoke("reset_overlay_position", { animate: overlayMotionEnabled() }).catch(
+                () => undefined,
+              )
+            : Promise.resolve();
+          void position
+            .then(() => window.show())
+            .then(() => {
+              if (!isReminderNotification(event)) return window.setFocus();
+            });
         }
       },
       onAudio: (pcm) => void speaker.current?.play(pcm),
@@ -59,8 +84,15 @@ export function App() {
         client.current = connection;
         connection.start();
       })
-      .catch(() => {
-        if (!disposed) setView((current) => ({ ...current, connection: "unavailable" }));
+      .catch((error: unknown) => {
+        if (!disposed) {
+          setView((current) => ({
+            ...current,
+            connection: "unavailable",
+            state: "unavailable",
+            detail: surface === "phone" ? phoneConnectionFailureMessage(error) : current.detail,
+          }));
+        }
       });
     return () => {
       disposed = true;
@@ -75,10 +107,10 @@ export function App() {
 
   useEffect(() => {
     if (surface !== "desktop" || view.state !== "idle" || pairing) return;
-    const hideDelay = view.detail ? 8_000 : 5_000;
+    const hideDelay = desktopIdleHideDelay(view.detail, view.transcript.length > 0);
     const timer = window.setTimeout(() => void getCurrentWindow().hide(), hideDelay);
     return () => window.clearTimeout(timer);
-  }, [pairing, surface, view.detail, view.state]);
+  }, [pairing, surface, view.detail, view.state, view.transcript.length]);
 
   useEffect(() => {
     if (surface === "phone" && view.state === "idle") void microphone.current?.stop();
@@ -113,7 +145,7 @@ export function App() {
         void speaker.current?.cancel();
         client.current?.interrupt();
       }}
-      onSubmit={(text) => client.current?.submitText(text)}
+      onSubmit={(text) => submitFromComposer(client.current, view.state, text)}
       onActivate={() => {
         if (surface !== "phone" || !client.current) return;
         const audio = microphone.current ?? new PhoneMicrophone();
@@ -131,6 +163,11 @@ export function App() {
             }));
           });
       }}
+      onMoveOverlay={() => void invoke("begin_overlay_drag")}
+      onResetOverlay={() =>
+        void invoke("reset_overlay_position", { animate: overlayMotionEnabled() })
+      }
+      onRetryConnection={() => window.location.reload()}
       onPairPhone={() => {
         setPairing({ qrDataUrl: null, expiresAt: null, error: null });
         void invoke<string>("desktop_session_token")
@@ -156,6 +193,44 @@ export function App() {
       onClosePairing={() => setPairing(null)}
     />
   );
+}
+
+export function desktopIdleHideDelay(detail: string | null, hasConversation: boolean): number {
+  if (hasConversation) return 120_000;
+  return detail ? 30_000 : 20_000;
+}
+
+export function overlayMotionEnabled(
+  matchMedia: ((query: string) => { matches: boolean }) | undefined = window.matchMedia?.bind(
+    window,
+  ),
+): boolean {
+  return !matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+
+export function submitFromComposer(
+  client: Pick<LiveClient, "startTextTurn" | "submitText"> | null,
+  state: SessionView["state"],
+  text: string,
+): void {
+  if (state === "idle") {
+    client?.startTextTurn(text);
+    return;
+  }
+  if (state === "listening") client?.submitText(text);
+}
+
+export function phoneConnectionFailureMessage(error: unknown): string {
+  if (error instanceof UnpairedPhoneError) {
+    return "This iPhone is not paired. Open JARVIS on your laptop and scan a new one-use QR code.";
+  }
+  if (error instanceof PhoneRequestError && error.status === 400) {
+    return "This pairing code expired or was already used. Generate a new code from your laptop.";
+  }
+  if (error instanceof PhoneRequestError && error.status === 401) {
+    return "This phone identity is no longer authorized. Pair it again from your laptop.";
+  }
+  return "The private JARVIS connection could not be completed. Confirm Tailscale is connected, then try again.";
 }
 
 type ClientCallbacks = Pick<

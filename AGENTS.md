@@ -4,7 +4,7 @@ Read `NORTHSTAR.md`, `project_spec.md`, and `ARCHITECTURE.md` before making prod
 
 ## Hard boundaries
 
-- Never read from or write to `C:\Users\ykyuv\dev\profile` for this project.
+- Never read from or write to a personal profile repository or profile directory for this project.
 - Never create a remote, publish, push, contact an external party, connect an account, or spend money without Yuvraj's explicit approval.
 - Never commit secrets, model weights, private voice references, transcripts, screenshots, databases, logs, or generated credentials.
 - Never let model output bypass the policy engine or become executable code implicitly.

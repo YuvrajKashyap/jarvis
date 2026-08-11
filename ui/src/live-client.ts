@@ -73,6 +73,13 @@ export class LiveClient {
     });
   }
 
+  startTextTurn(text: string) {
+    const normalized = text.trim();
+    if (!normalized) return;
+    this.activate("ui");
+    this.submitText(normalized);
+  }
+
   sendAudio(pcm: ArrayBuffer) {
     if (pcm.byteLength === 0 || pcm.byteLength > 8_191 || pcm.byteLength % 2 !== 0) return;
     if (this.#socket?.readyState !== 1) return;

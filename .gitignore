@@ -31,9 +31,25 @@ artifacts/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 models/
+*.gguf
+*.safetensors
+*.onnx
 private/
 voice-references/
+recordings/
+transcripts/
+screenshots/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.opus
+*.pcm
+pairing/
+*.token
 
 .idea/
 .vscode/

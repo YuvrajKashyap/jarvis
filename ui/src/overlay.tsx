@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 export type OverlayView = {
   connection: "connected" | "reconnecting" | "unavailable";
@@ -38,6 +38,9 @@ type ConversationOverlayProps = {
   onInterrupt: () => void;
   onSubmit: (text: string) => void;
   onActivate: () => void;
+  onMoveOverlay?: () => void;
+  onResetOverlay?: () => void;
+  onRetryConnection?: () => void;
   pairing?: {
     qrDataUrl: string | null;
     expiresAt: string | null;
@@ -56,20 +59,46 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
     onInterrupt,
     onSubmit,
     onActivate,
+    onMoveOverlay,
+    onResetOverlay,
+    onRetryConnection,
     pairing,
     onPairPhone,
     onClosePairing,
   } = _props;
   const [draft, setDraft] = useState("");
+  const transcriptRef = useRef<HTMLOListElement>(null);
 
-  if (surface === "phone" && view.connection === "unavailable") {
+  useLayoutEffect(() => {
+    if (view.transcript.length === 0) return;
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    transcript.scrollTop = transcript.scrollHeight;
+  }, [view.transcript]);
+
+  if (surface === "phone" && view.connection !== "connected") {
+    const connecting = view.connection === "reconnecting";
     return (
       <main className="phone-shell">
-        <section className="unavailable-card" aria-describedby="unavailable-detail">
-          <span className="eyebrow">Host status</span>
-          <h1>JARVIS unavailable</h1>
-          <p id="unavailable-detail">Your laptop host is offline or unreachable.</p>
-          <div className="horizon horizon--quiet" aria-hidden="true" />
+        <section className="connection-card" aria-describedby="connection-detail">
+          <span className="eyebrow">Private companion</span>
+          <h1>{connecting ? "Connecting to JARVIS" : "JARVIS connection failed"}</h1>
+          <p id="connection-detail">
+            {connecting
+              ? "Securing a private connection to your laptop."
+              : (view.detail ?? "Your laptop host could not be reached.")}
+          </p>
+          <div
+            className={`horizon ${connecting ? "horizon--connecting" : "horizon--quiet"}`}
+            aria-hidden="true"
+          >
+            {connecting ? <span className="horizon__signal" /> : null}
+          </div>
+          {!connecting ? (
+            <button className="button button--retry" type="button" onClick={onRetryConnection}>
+              Try again
+            </button>
+          ) : null}
         </section>
       </main>
     );
@@ -81,9 +110,23 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
   return (
     <section className={`overlay overlay--${surface}`} aria-label="JARVIS conversation">
       <header className="status-row">
-        <span className="wordmark" aria-hidden="true">
-          JARVIS
-        </span>
+        <div className="brand-cluster">
+          {surface === "desktop" ? (
+            <button
+              className="drag-handle"
+              type="button"
+              aria-label="Move JARVIS"
+              title="Drag to move · double-click to reset"
+              onPointerDown={onMoveOverlay}
+              onDoubleClick={onResetOverlay}
+            >
+              <span aria-hidden="true" />
+            </button>
+          ) : null}
+          <span className="wordmark" aria-hidden="true">
+            JARVIS
+          </span>
+        </div>
         <span className="state" role="status" aria-live="polite">
           {stateLabel}
           {view.detail ? <span className="state-detail"> | {view.detail}</span> : null}
@@ -98,7 +141,10 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
         <span className="horizon__signal" aria-hidden="true" />
       </div>
 
-      {surface === "desktop" && view.state === "idle" && !pairing ? (
+      {surface === "desktop" &&
+      view.state === "idle" &&
+      view.transcript.length === 0 &&
+      !pairing ? (
         <button className="pair-phone" type="button" onClick={onPairPhone}>
           Pair iPhone
         </button>
@@ -144,8 +190,8 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
         </button>
       ) : null}
 
-      {view.transcript.length > 0 ? (
-        <ol className="transcript" aria-label="Conversation transcript">
+      {!pairing && view.transcript.length > 0 ? (
+        <ol ref={transcriptRef} className="transcript" aria-label="Conversation transcript">
           {view.transcript.map((line) => (
             <li className={`utterance utterance--${line.speaker}`} key={line.id}>
               <span className="speaker">{line.speaker === "user" ? "You" : "JARVIS"}</span>
@@ -155,7 +201,7 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
         </ol>
       ) : null}
 
-      {view.state === "listening" ? (
+      {view.state === "listening" || (surface === "desktop" && view.state === "idle") ? (
         <form
           className="message-box"
           aria-label="Message JARVIS"

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ProtocolError, parseServerEvent } from "./protocol-validation";
 
@@ -31,5 +31,19 @@ describe("parseServerEvent", () => {
       ProtocolError,
     );
     expect(() => parseServerEvent("not-json")).toThrow(ProtocolError);
+  });
+
+  it("validates under the desktop content security policy without runtime code generation", async () => {
+    vi.resetModules();
+    vi.stubGlobal("Function", () => {
+      throw new EvalError("runtime code generation is blocked");
+    });
+
+    try {
+      const module = await import("./protocol-validation");
+      expect(module.parseServerEvent(JSON.stringify(validState)).type).toBe("state_changed");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

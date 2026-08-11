@@ -94,4 +94,30 @@ describe("LiveClient", () => {
     expect(audio).toHaveBeenCalledWith(pcm);
     expect(events).not.toHaveBeenCalled();
   });
+
+  it("starts a fresh typed turn from the idle composer", () => {
+    const socket = new FakeSocket();
+    const client = new LiveClient({
+      url: "ws://127.0.0.1:7331/v1/live",
+      authProtocol: "jarvis.desktop.secret-token",
+      deviceId: "desktop",
+      socketFactory: () => socket,
+      onConnection: () => undefined,
+      onEvent: () => undefined,
+    });
+    client.start();
+    socket.readyState = 1;
+    socket.onopen?.(new Event("open"));
+
+    const startTextTurn = Reflect.get(client, "startTextTurn") as unknown;
+    expect(startTextTurn).toEqual(expect.any(Function));
+    if (typeof startTextTurn !== "function") return;
+    startTextTurn.call(client, "Continue our conversation.");
+
+    const events = socket.sent
+      .filter((event): event is string => typeof event === "string")
+      .map((event) => JSON.parse(event));
+    expect(events.map((event) => event.type)).toEqual(["activate", "submit_text"]);
+    expect(events[0].turn_id).toBe(events[1].turn_id);
+  });
 });

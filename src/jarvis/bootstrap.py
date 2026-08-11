@@ -169,6 +169,7 @@ class BootstrapSettings(BaseSettings):
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost")
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:1420",
+        "http://tauri.localhost",
         "tauri://localhost",
         "https://tauri.localhost",
     )

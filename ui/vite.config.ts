@@ -5,10 +5,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
+  base: "./",
   plugins: [
     react(),
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       includeAssets: ["jarvis.svg", "jarvis-128.png", "jarvis-512.png"],
       manifest: {
         name: "JARVIS",

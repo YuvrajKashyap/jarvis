@@ -72,8 +72,15 @@ def test_readiness_blocks_missing_local_intelligence_assets() -> None:
     assert report.automation_complete is False
 
 
-def test_low_memory_is_reported_as_transient_without_demanding_app_closure() -> None:
+def test_measured_q4_headroom_is_ready_without_demanding_app_closure() -> None:
     report = evaluate_readiness(ready_environment(available_memory_bytes=int(1.5 * 1024**3)))
+
+    headroom = next(item for item in report.items if item.code == "memory_headroom")
+    assert headroom.status == "ready"
+
+
+def test_low_memory_is_reported_as_transient_without_demanding_app_closure() -> None:
+    report = evaluate_readiness(ready_environment(available_memory_bytes=int(0.75 * 1024**3)))
 
     pressure = next(item for item in report.items if item.code == "memory_headroom")
     assert pressure.status == "transient"

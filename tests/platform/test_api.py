@@ -381,6 +381,21 @@ def test_health_is_minimal_public_and_has_security_headers(client: TestClient) -
     assert TOKEN not in response.text
 
 
+def test_desktop_origin_can_preflight_authenticated_http_requests(client: TestClient) -> None:
+    response = client.options(
+        "/v1/pairing/offers",
+        headers={
+            "origin": "http://127.0.0.1:1420",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "authorization,content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:1420"
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_phone_shell_is_served_locally_with_microphone_permission(client: TestClient) -> None:
     response = client.get("/")
 
@@ -546,7 +561,7 @@ def test_pairing_offer_places_secret_only_in_a_tailscale_fragment() -> None:
         runtime=RuntimeCoordinator(),
         settings=ApiSettings(
             bearer_token=TOKEN,
-            phone_base_url="https://yuvraj-omen.example.ts.net",
+            phone_base_url="https://jarvis-host.example.ts.net",
             allowed_hosts=("testserver",),
             allowed_origins=("http://127.0.0.1:1420",),
         ),

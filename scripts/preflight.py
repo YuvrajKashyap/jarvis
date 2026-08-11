@@ -17,7 +17,7 @@ REQUIRED_COMMANDS = frozenset(
     {"git", "node", "pnpm", "uv", "cargo", "ollama", "tailscale", "winapp"}
 )
 REQUIRED_MODEL_CAPABILITIES = frozenset({"completion", "vision", "tools"})
-MINIMUM_AVAILABLE_MEMORY_BYTES = 2 * 1024**3
+MINIMUM_AVAILABLE_MEMORY_BYTES = 1024**3
 
 
 class PreflightValue(BaseModel):

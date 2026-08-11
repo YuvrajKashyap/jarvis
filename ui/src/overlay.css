@@ -14,6 +14,12 @@
   --amber: #f0aa63;
   --fault: #e46b61;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --surface-inset: 16px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
 }
 
 * {
@@ -28,31 +34,109 @@ body,
   margin: 0;
 }
 
+html[data-surface="desktop"],
+html[data-surface="desktop"] body,
+html[data-surface="desktop"] #root {
+  overflow: hidden;
+  background: transparent;
+}
+
 button {
   font: inherit;
 }
 
 .overlay {
   position: relative;
-  width: min(720px, calc(100vw - 24px));
-  margin: 12px auto;
+  isolation: isolate;
+  width: min(720px, calc(100vw - (var(--surface-inset) * 2)));
+  margin: var(--surface-inset) auto;
   overflow: hidden;
-  border: 1px solid var(--glass-edge);
-  border-radius: 18px;
-  background: linear-gradient(110deg, rgba(121, 175, 200, 0.06), transparent 38%), var(--glass);
+  border: 1px solid rgba(190, 225, 239, 0.2);
+  border-radius: 20px;
+  background:
+    linear-gradient(112deg, rgba(121, 175, 200, 0.09), transparent 42%),
+    linear-gradient(180deg, rgba(16, 24, 33, 0.91), rgba(8, 13, 19, 0.92));
   box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.42),
-    inset 0 1px rgba(255, 255, 255, 0.045);
-  backdrop-filter: blur(22px) saturate(118%);
-  -webkit-backdrop-filter: blur(22px) saturate(118%);
+    0 20px 56px rgba(0, 0, 0, 0.32),
+    0 3px 14px rgba(0, 0, 0, 0.24),
+    inset 0 1px rgba(255, 255, 255, 0.065);
+  -webkit-backdrop-filter: blur(20px) saturate(112%);
+  backdrop-filter: blur(20px) saturate(112%);
+}
+
+.overlay--desktop {
+  display: flex;
+  width: calc(100vw - (var(--surface-inset) * 2));
+  height: auto;
+  flex-direction: column;
 }
 
 .status-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 13px 18px 10px;
+  min-height: 48px;
+  padding: 7px 14px 6px 10px;
+}
+
+.brand-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.drag-handle {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  background: rgba(121, 175, 200, 0.11);
+}
+
+.drag-handle span,
+.drag-handle span::before,
+.drag-handle span::after {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.drag-handle span {
+  position: relative;
+}
+
+.drag-handle span::before,
+.drag-handle span::after {
+  position: absolute;
+  top: 0;
+  content: "";
+}
+
+.drag-handle span::before {
+  left: -7px;
+}
+
+.drag-handle span::after {
+  right: -7px;
 }
 
 .wordmark,
@@ -71,9 +155,12 @@ button {
 }
 
 .state {
+  min-width: 0;
   color: var(--frost);
   font-size: 0.78rem;
   font-weight: 520;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .state-detail,
@@ -127,10 +214,20 @@ button {
   max-height: 108px;
   gap: 7px;
   margin: 0;
-  padding: 13px 18px 15px;
+  padding: 14px 18px 16px;
   overflow-y: auto;
   list-style: none;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.overlay--desktop .transcript {
+  min-height: 0;
+  max-height: 280px;
+  flex: 0 1 auto;
+}
+
+.transcript::-webkit-scrollbar {
+  display: none;
 }
 
 .utterance {
@@ -181,7 +278,9 @@ button {
 }
 
 .button,
-.interrupt {
+.interrupt,
+.call-jarvis,
+.pair-phone {
   min-height: 36px;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -198,12 +297,13 @@ button {
 .message-box {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
-  margin-top: 14px;
+  gap: var(--space-sm);
+  margin: 12px 16px 16px;
 }
 
 .message-box input {
   min-width: 0;
+  min-height: 44px;
   border: 1px solid rgba(190, 225, 239, 0.15);
   border-radius: 11px;
   padding: 10px 12px;
@@ -218,6 +318,8 @@ button {
 }
 
 .message-box button {
+  min-width: 72px;
+  min-height: 44px;
   border: 1px solid rgba(121, 175, 200, 0.35);
   border-radius: 11px;
   padding: 0 14px;
@@ -232,8 +334,10 @@ button {
 }
 
 .call-jarvis {
+  display: block;
   justify-self: center;
-  margin-top: 14px;
+  min-height: 44px;
+  margin: 16px auto;
   border: 1px solid rgba(121, 175, 200, 0.32);
   border-radius: 999px;
   padding: 10px 18px;
@@ -246,7 +350,8 @@ button {
   display: block;
   margin: 12px auto 13px;
   border: 0;
-  padding: 4px 8px;
+  min-height: 36px;
+  padding: 4px 12px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
@@ -255,8 +360,8 @@ button {
 
 .pairing-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 116px auto;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 128px auto;
+  gap: 20px;
   align-items: center;
   padding: 16px 18px 18px;
 }
@@ -276,14 +381,19 @@ button {
 }
 
 .pairing-card__qr {
-  width: 116px;
-  height: 116px;
-  border-radius: 8px;
+  width: 128px;
+  height: 128px;
+  border: 6px solid #fff;
+  border-radius: 12px;
   background: #fff;
 }
 
+.drag-handle:focus-visible,
 .button:focus-visible,
-.interrupt:focus-visible {
+.interrupt:focus-visible,
+.call-jarvis:focus-visible,
+.pair-phone:focus-visible,
+.message-box button:focus-visible {
   outline: 2px solid var(--ion-bright);
   outline-offset: 2px;
 }
@@ -320,16 +430,17 @@ button {
   display: grid;
   min-height: 100dvh;
   place-items: center;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background:
     radial-gradient(circle at 50% 20%, rgba(121, 175, 200, 0.09), transparent 38%), #0b1118;
 }
 
-.unavailable-card {
+.connection-card {
   width: min(420px, 100%);
 }
 
-.unavailable-card h1 {
+.connection-card h1 {
   margin: 8px 0 6px;
   font-family: Bahnschrift, "Arial Narrow", sans-serif;
   font-size: clamp(1.55rem, 7vw, 2.4rem);
@@ -337,10 +448,31 @@ button {
   letter-spacing: -0.025em;
 }
 
-.unavailable-card p {
+.connection-card p {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.connection-card .horizon {
+  width: 72px;
+  margin-top: 24px;
+}
+
+.horizon--connecting .horizon__signal {
+  animation: scan 1.25s linear infinite;
+}
+
+.button--retry {
+  min-height: 44px;
+  margin-top: 24px;
+  border-color: rgba(121, 175, 200, 0.38);
+  background: rgba(121, 175, 200, 0.13);
+}
+
+.overlay--phone {
+  width: min(680px, calc(100vw - 32px));
+  margin: max(16px, env(safe-area-inset-top)) auto max(16px, env(safe-area-inset-bottom));
 }
 
 @keyframes scan {
@@ -351,8 +483,18 @@ button {
 
 @media (max-width: 560px) {
   .overlay {
-    width: calc(100vw - 16px);
+    width: calc(100vw - 24px);
+    margin: 12px auto;
     border-radius: 16px;
+  }
+
+  .status-row {
+    align-items: flex-start;
+  }
+
+  .state-detail {
+    display: block;
+    margin-top: 2px;
   }
 
   .approval {
@@ -361,6 +503,10 @@ button {
 
   .approval__actions {
     justify-content: flex-end;
+  }
+
+  .pairing-card {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -372,12 +518,18 @@ button {
   }
 
   .button,
-  .interrupt {
+  .interrupt,
+  .drag-handle {
     transition: none;
   }
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .drag-handle:hover {
+    color: var(--ion-bright);
+    background: rgba(121, 175, 200, 0.075);
+  }
+
   .button--quiet:hover {
     background: rgba(231, 238, 244, 0.06);
   }

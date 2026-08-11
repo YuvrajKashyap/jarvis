@@ -9,7 +9,7 @@ license = "Proprietary"
 
 [lib]
 name = "jarvis_host"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib"]
 
 [[bin]]
 name = "jarvis-host"

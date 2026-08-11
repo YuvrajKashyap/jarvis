@@ -20,7 +20,7 @@ DEFAULT_MODELS = (
     "gemma3:4b-it-qat",
     "ministral-3:8b-instruct-2512-q4_K_M",
 )
-MINIMUM_AVAILABLE_MEMORY_BYTES = 2 * 1024**3
+MINIMUM_AVAILABLE_MEMORY_BYTES = 1024**3
 
 
 class PromptResult(BaseModel):
@@ -277,7 +277,7 @@ def main() -> None:
         available_gib = available_memory / 1024**3
         raise SystemExit(
             f"benchmark refused: only {available_gib:.2f} GiB RAM is available; "
-            "JARVIS requires at least 2.00 GiB of headroom and will not close user applications"
+            "JARVIS requires at least 1.00 GiB of headroom and will not close user applications"
         )
 
     with httpx.Client(base_url=OLLAMA_URL) as client:

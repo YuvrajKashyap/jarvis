@@ -1,14 +1,13 @@
-import Ajv2020, { type ErrorObject } from "ajv/dist/2020";
-import addFormats from "ajv-formats";
+import type { ErrorObject } from "ajv";
 
 import type { ServerEvent } from "./generated";
-import serverEventSchema from "./generated/server-event.schema.json";
+import generatedServerEventValidator from "./generated/server-event.validator";
 
-const ajv = new Ajv2020({ allErrors: true, strict: true });
-addFormats(ajv);
-const validationSchema: Record<string, unknown> = { ...serverEventSchema };
-delete validationSchema.discriminator;
-const validateServerEvent = ajv.compile<ServerEvent>(validationSchema);
+type ProtocolValidator = ((candidate: unknown) => candidate is ServerEvent) & {
+  errors?: ErrorObject[] | null;
+};
+
+const validateServerEvent = generatedServerEventValidator as unknown as ProtocolValidator;
 
 export class ProtocolError extends Error {
   readonly errors: ErrorObject[];

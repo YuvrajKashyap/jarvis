@@ -4,6 +4,7 @@ import type { OverlayView } from "./overlay";
 export type SessionView = OverlayView & {
   lastSequence: number;
   lastSessionId: string | null;
+  detailIsPersistent: boolean;
 };
 
 export function initialView(): SessionView {
@@ -15,6 +16,7 @@ export function initialView(): SessionView {
     detail: null,
     lastSequence: -1,
     lastSessionId: null,
+    detailIsPersistent: false,
   };
 }
 
@@ -31,8 +33,16 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
   };
 
   switch (event.type) {
-    case "state_changed":
-      return { ...next, state: event.payload.state, detail: event.payload.detail ?? null };
+    case "state_changed": {
+      const preserveDetail =
+        event.payload.state === "idle" && event.payload.detail === null && next.detailIsPersistent;
+      return {
+        ...next,
+        state: event.payload.state,
+        detail: preserveDetail ? next.detail : (event.payload.detail ?? null),
+        detailIsPersistent: preserveDetail,
+      };
+    }
     case "transcript":
       return {
         ...next,
@@ -67,11 +77,13 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
         ...next,
         approval: null,
         detail: event.payload.message,
+        detailIsPersistent: true,
       };
     case "error":
       return {
         ...next,
         detail: event.payload.message,
+        detailIsPersistent: true,
       };
   }
 }
@@ -79,6 +91,13 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
 export function shouldRevealDesktopOverlay(event: ServerEvent): boolean {
   if (event.type === "state_changed") return event.payload.state !== "idle";
   return event.type === "capability_result" || event.type === "approval_required";
+}
+
+export function shouldRepositionDesktopOverlay(event: ServerEvent): boolean {
+  if (event.type === "state_changed") {
+    return ["listening", "private", "meeting", "lecture", "ambient"].includes(event.payload.state);
+  }
+  return event.type === "approval_required" || isReminderNotification(event);
 }
 
 export function isReminderNotification(

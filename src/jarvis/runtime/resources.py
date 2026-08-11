@@ -4,6 +4,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jarvis.platform.models import ModelHealth
+
 
 class ResourceSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -17,7 +19,7 @@ class ResourceSnapshot(BaseModel):
 class ResourceLimits(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    minimum_available_memory_bytes: int = Field(default=2 * 1024**3, ge=512 * 1024**2)
+    minimum_available_memory_bytes: int = Field(default=1024**3, ge=512 * 1024**2)
     maximum_gpu_temperature_c: int = Field(default=85, ge=50, le=100)
 
 
@@ -26,6 +28,8 @@ class ResourceProbe(Protocol):
 
 
 class ModelLoader(Protocol):
+    async def health(self) -> ModelHealth: ...
+
     async def load(self, model: str) -> None: ...
 
     async def unload(self, model: str) -> None: ...
@@ -59,7 +63,12 @@ class ResourceGovernor:
     async def ensure_resident(self, model: str) -> ModelResidency:
         async with self._lock:
             if self.resident_model == model:
-                self._assert_safe(self._probe.snapshot())
+                self._assert_thermally_safe(self._probe.snapshot())
+                return ModelResidency.ALREADY_RESIDENT
+            health = await self._models.health()
+            if any(loaded.name == model for loaded in health.loaded_models):
+                self._assert_thermally_safe(self._probe.snapshot())
+                self.resident_model = model
                 return ModelResidency.ALREADY_RESIDENT
             self._assert_safe(self._probe.snapshot())
             if self.resident_model is not None:
@@ -85,6 +94,9 @@ class ResourceGovernor:
     def _assert_safe(self, snapshot: ResourceSnapshot) -> None:
         if snapshot.available_memory_bytes < self._limits.minimum_available_memory_bytes:
             raise ResourcePressure("available_memory")
+        self._assert_thermally_safe(snapshot)
+
+    def _assert_thermally_safe(self, snapshot: ResourceSnapshot) -> None:
         if (
             snapshot.gpu_temperature_c is not None
             and snapshot.gpu_temperature_c > self._limits.maximum_gpu_temperature_c

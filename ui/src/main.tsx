@@ -3,8 +3,17 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
+import { enablePhonePwaUpdates } from "./pwa-updates";
 
-registerSW({ immediate: false });
+if ("__TAURI_INTERNALS__" in window) {
+  void navigator.serviceWorker
+    ?.getRegistrations()
+    .then((registrations) =>
+      Promise.all(registrations.map((registration) => registration.unregister())),
+    );
+} else {
+  enablePhonePwaUpdates(registerSW);
+}
 
 const root = document.getElementById("root");
 if (root === null) {

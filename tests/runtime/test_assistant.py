@@ -8,6 +8,7 @@ from jarvis.platform.models import (
     ModelChunk,
     ModelChunkKind,
     ModelHealth,
+    ToolSchema,
 )
 from jarvis.runtime.assistant import (
     DEFAULT_SYSTEM_PROMPT,
@@ -140,3 +141,52 @@ async def test_tool_continuation_is_placed_after_the_user_request() -> None:
         ("user", "What am I looking at?"),
         ("tool", '{"title":"JARVIS"}'),
     ]
+
+
+async def test_casual_conversation_does_not_offer_action_tools() -> None:
+    model = FakeModel([ModelChunk(kind=ModelChunkKind.DONE)])
+    assistant = AssistantTurn(
+        model=model,
+        settings=AssistantSettings(primary_model="local-test"),
+        tools=(
+            ToolSchema(
+                name="context.active_window",
+                description="Read the active Windows application",
+                parameters={"type": "object", "additionalProperties": False},
+            ),
+        ),
+    )
+
+    _events = [
+        event
+        async for event in assistant.stream(
+            "Hello?",
+            cancelled=lambda: False,
+        )
+    ]
+
+    assert model.requests[0].tools == ()
+
+
+async def test_operational_request_keeps_action_tools_available() -> None:
+    model = FakeModel([ModelChunk(kind=ModelChunkKind.DONE)])
+    tool = ToolSchema(
+        name="context.active_window",
+        description="Read the active Windows application",
+        parameters={"type": "object", "additionalProperties": False},
+    )
+    assistant = AssistantTurn(
+        model=model,
+        settings=AssistantSettings(primary_model="local-test"),
+        tools=(tool,),
+    )
+
+    _events = [
+        event
+        async for event in assistant.stream(
+            "What window is open right now?",
+            cancelled=lambda: False,
+        )
+    ]
+
+    assert model.requests[0].tools == (tool,)

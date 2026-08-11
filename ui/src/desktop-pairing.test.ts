@@ -10,7 +10,7 @@ describe("desktop phone pairing", () => {
           JSON.stringify({
             pairing_id: "019fd977-1d96-7892-950c-6afbb71f7cf0",
             expires_at: "2026-08-08T02:05:00Z",
-            pairing_url: "https://yuvraj-omen.example.ts.net/#pair=one-use-secret",
+            pairing_url: "https://jarvis-host.example.ts.net/#pair=one-use-secret",
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
         ),

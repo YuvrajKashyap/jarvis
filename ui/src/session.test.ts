@@ -5,6 +5,7 @@ import {
   initialView,
   isReminderNotification,
   reduceServerEvent,
+  shouldRepositionDesktopOverlay,
   shouldRevealDesktopOverlay,
 } from "./session";
 
@@ -41,6 +42,34 @@ describe("reduceServerEvent", () => {
     expect(shouldRevealDesktopOverlay(idle)).toBe(false);
     expect(isReminderNotification(idle)).toBe(false);
   });
+
+  it("relocates only at the start of an invocation or for a proactive result", () => {
+    const listening: ServerEvent = {
+      ...envelope,
+      type: "state_changed",
+      payload: { state: "listening", detail: "desktop" },
+    };
+    const thinking: ServerEvent = {
+      ...envelope,
+      type: "state_changed",
+      payload: { state: "thinking", detail: null },
+    };
+    const reminder: ServerEvent = {
+      ...envelope,
+      type: "capability_result",
+      payload: {
+        action_id: "019fd977-1d96-7892-950c-6afbb71f7cf6",
+        capability: "notifications.remind",
+        status: "succeeded",
+        message: "Leave for practice now.",
+        undo_available: false,
+      },
+    };
+
+    expect(shouldRepositionDesktopOverlay(listening)).toBe(true);
+    expect(shouldRepositionDesktopOverlay(thinking)).toBe(false);
+    expect(shouldRepositionDesktopOverlay(reminder)).toBe(true);
+  });
   it("projects authoritative state changes into the overlay", () => {
     const event: ServerEvent = {
       ...envelope,
@@ -52,6 +81,47 @@ describe("reduceServerEvent", () => {
 
     expect(view.state).toBe("thinking");
     expect(view.detail).toBe("reading active window");
+  });
+
+  it("keeps a turn error visible when the runtime returns to idle", () => {
+    const error: ServerEvent = {
+      ...envelope,
+      type: "error",
+      payload: {
+        code: "resource_pressure",
+        message: "Current memory pressure is too high for a safe response.",
+        recoverable: true,
+      },
+    };
+    const idle: ServerEvent = {
+      ...envelope,
+      sequence: 2,
+      type: "state_changed",
+      payload: { state: "idle", detail: null },
+    };
+
+    const view = [error, idle].reduce(reduceServerEvent, initialView());
+
+    expect(view.state).toBe("idle");
+    expect(view.detail).toBe("Current memory pressure is too high for a safe response.");
+  });
+
+  it("clears the active device label when a successful turn returns to idle", () => {
+    const listening: ServerEvent = {
+      ...envelope,
+      type: "state_changed",
+      payload: { state: "listening", detail: "desktop" },
+    };
+    const idle: ServerEvent = {
+      ...envelope,
+      sequence: 2,
+      type: "state_changed",
+      payload: { state: "idle", detail: null },
+    };
+
+    const view = [listening, idle].reduce(reduceServerEvent, initialView());
+
+    expect(view.detail).toBeNull();
   });
 
   it("coalesces streamed assistant text by turn without losing prior user text", () => {

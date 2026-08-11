@@ -47,3 +47,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $resolvedSidecar "jarvis-core.exe"))
 }
 
 Invoke-Checked "pnpm" @("tauri", "build")
+Invoke-Checked "uv" @(
+    "run", "python", "scripts/desktop_acceptance.py",
+    "src-tauri/target/release/jarvis-host.exe"
+)

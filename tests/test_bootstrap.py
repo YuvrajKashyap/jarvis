@@ -81,7 +81,7 @@ def test_composition_root_adds_configured_tailnet_origin_for_phone_pairing(
         data_directory=tmp_path / "data",
         memory_directory=tmp_path / "memory",
         file_roots=(tmp_path,),
-        phone_base_url="https://yuvraj-omen.example.ts.net",
+        phone_base_url="https://jarvis-host.example.ts.net",
         desktop_speech_enabled=False,
         model_prewarm_enabled=False,
     )
@@ -95,7 +95,7 @@ def test_composition_root_adds_configured_tailnet_origin_for_phone_pairing(
         )
 
     assert response.status_code == 201
-    assert response.json()["pairing_url"].startswith("https://yuvraj-omen.example.ts.net/#pair=")
+    assert response.json()["pairing_url"].startswith("https://jarvis-host.example.ts.net/#pair=")
 
 
 def test_default_runtime_keeps_the_measured_primary_model_resident() -> None:
@@ -104,3 +104,9 @@ def test_default_runtime_keeps_the_measured_primary_model_resident() -> None:
     assert settings.primary_model == "qwen3.5:4b-q4_K_M"
     assert settings.model_context_length == 4_096
     assert settings.model_prewarm_enabled is True
+
+
+def test_default_runtime_allows_the_packaged_windows_webview_origin() -> None:
+    settings = BootstrapSettings()
+
+    assert "http://tauri.localhost" in settings.allowed_origins
