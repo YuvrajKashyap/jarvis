@@ -28,8 +28,8 @@ try {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
     await capture(browser, "conversation", { width: 1280, height: 720 }, "desktop-conversation.png");
+    await capture(browser, "proactivity", { width: 1280, height: 720 }, "proactive-assistance.png", true);
     await capture(browser, "approval", { width: 1280, height: 720 }, "approval-gate.png");
-    await capture(browser, "readiness", { width: 1280, height: 780 }, "readiness-diagnostics.png", true);
     await capture(browser, "phone", { width: 430, height: 860 }, "phone-companion.png");
   } finally {
     await browser.close();
@@ -38,12 +38,12 @@ try {
   server.kill();
 }
 
-async function capture(browser, scenario, viewport, filename, expandDetails = false) {
+async function capture(browser, scenario, viewport, filename, expandReason = false) {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   try {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(`${baseUrl}?scenario=${scenario}`, { waitUntil: "networkidle" });
-    if (expandDetails) await page.getByText("3 checks need attention").click();
+    if (expandReason) await page.getByText("Why I mentioned it").click();
     await page.screenshot({ path: resolve(output, filename), fullPage: true });
   } finally {
     await page.close();

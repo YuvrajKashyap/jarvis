@@ -81,11 +81,11 @@ Every action re-enters a deterministic policy engine immediately before executio
 
 ![JARVIS holding an external action for exact user approval](docs/assets/approval-gate.png)
 
-### Readiness is based on evidence
+### JARVIS can notice what matters
 
-The authenticated diagnostics distinguish prerequisites, degraded subsystems, unverified physical tests, and hard blockers. In the measured run below, JARVIS loaded Qwen3.5 4B Q4, detected that available RAM fell to 0.66 GiB, and unloaded the model automatically.
+Proactivity is tied to authorized events and personal preferences. JARVIS can watch a build, notice that a permission guarantee regressed, explain why it interrupted, and offer to help. It does not change files or take the next action unless I ask.
 
-![JARVIS readiness diagnostics showing the measured hardware limit](docs/assets/readiness-diagnostics.png)
+![JARVIS noticing a permission regression in a watched build](docs/assets/proactive-assistance.png)
 
 ### The phone reaches the same JARVIS
 
@@ -128,7 +128,7 @@ The infrastructure work is part of the product. The repository includes Windows 
 | Layer | Fresh result |
 | --- | ---: |
 | Python | 308 tests passed |
-| React / TypeScript | 60 tests passed |
+| React / TypeScript | 63 tests passed |
 | Rust / Tauri | 20 tests passed |
 | Python coverage | 86.59% |
 | Formatting, linting, typing, contract drift, builds | Passed |
