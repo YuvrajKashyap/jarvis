@@ -190,3 +190,98 @@ async def test_operational_request_keeps_action_tools_available() -> None:
     ]
 
     assert model.requests[0].tools == (tool,)
+
+
+async def test_operational_request_exposes_only_relevant_capabilities() -> None:
+    model = FakeModel([ModelChunk(kind=ModelChunkKind.DONE)])
+    tools = tuple(
+        ToolSchema(
+            name=name,
+            description=name,
+            parameters={"type": "object", "additionalProperties": False},
+        )
+        for name in (
+            "context.active_window",
+            "system.health",
+            "files.read_text",
+            "terminal.execute",
+            "schedules.create",
+        )
+    )
+    assistant = AssistantTurn(
+        model=model,
+        settings=AssistantSettings(primary_model="local-test"),
+        tools=tools,
+    )
+
+    _events = [
+        event
+        async for event in assistant.stream(
+            "How much RAM and GPU memory is my system using?",
+            cancelled=lambda: False,
+        )
+    ]
+
+    assert [tool.name for tool in model.requests[0].tools] == ["system.health"]
+
+
+async def test_current_time_request_selects_only_the_exact_clock_capability() -> None:
+    model = FakeModel([ModelChunk(kind=ModelChunkKind.DONE)])
+    tools = tuple(
+        ToolSchema(
+            name=name,
+            description=name,
+            parameters={"type": "object", "additionalProperties": False},
+        )
+        for name in ("context.active_window", "context.local_time", "system.health")
+    )
+    assistant = AssistantTurn(
+        model=model,
+        settings=AssistantSettings(primary_model="local-test"),
+        tools=tools,
+    )
+
+    _events = [
+        event
+        async for event in assistant.stream(
+            "What time is it right now?",
+            cancelled=lambda: False,
+        )
+    ]
+
+    assert [tool.name for tool in model.requests[0].tools] == ["context.local_time"]
+
+
+async def test_ambiguous_operational_request_uses_a_small_safe_observation_set() -> None:
+    model = FakeModel([ModelChunk(kind=ModelChunkKind.DONE)])
+    tools = tuple(
+        ToolSchema(
+            name=name,
+            description=name,
+            parameters={"type": "object", "additionalProperties": False},
+        )
+        for name in (
+            "context.active_window",
+            "system.health",
+            "files.write_text",
+            "terminal.execute",
+        )
+    )
+    assistant = AssistantTurn(
+        model=model,
+        settings=AssistantSettings(primary_model="local-test"),
+        tools=tools,
+    )
+
+    _events = [
+        event
+        async for event in assistant.stream(
+            "Fix this for me.",
+            cancelled=lambda: False,
+        )
+    ]
+
+    assert [tool.name for tool in model.requests[0].tools] == [
+        "context.active_window",
+        "system.health",
+    ]

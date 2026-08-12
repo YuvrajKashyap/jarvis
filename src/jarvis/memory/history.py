@@ -4,12 +4,14 @@ from typing import Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Field as SqlField
 from sqlmodel import Session, SQLModel, col, select
 
 from jarvis.platform.sqlite import SQLiteStore
+
+CONSOLIDATION_VERSION = 2
 
 
 class DuplicateConversationMessage(RuntimeError):
@@ -53,6 +55,10 @@ class ConversationHistory(Protocol):
         session_id: UUID | None = None,
     ) -> list[ConversationMessage]: ...
 
+    def unconsolidated(self, *, limit: int) -> list[ConversationMessage]: ...
+
+    def mark_consolidated(self, message_ids: tuple[UUID, ...]) -> None: ...
+
 
 class ConversationMessageRow(SQLModel, table=True):
     __tablename__ = "conversation_message"
@@ -66,6 +72,7 @@ class ConversationMessageRow(SQLModel, table=True):
     content: str
     device_id: str
     created_at: str = SqlField(index=True)
+    consolidation_version: int | None = SqlField(default=None, index=True)
 
 
 class ConversationHistoryRepository:
@@ -109,6 +116,42 @@ class ConversationHistoryRepository:
             ).all()
         return [_from_row(row) for row in reversed(rows)]
 
+    def unconsolidated(self, *, limit: int) -> list[ConversationMessage]:
+        if limit < 1 or limit > 500:
+            raise ValueError("history limit must be between 1 and 500")
+        with Session(self._sqlite.engine) as session:
+            rows = session.exec(
+                select(ConversationMessageRow)
+                .where(
+                    (col(ConversationMessageRow.consolidation_version).is_(None))
+                    | (col(ConversationMessageRow.consolidation_version) < CONSOLIDATION_VERSION)
+                )
+                .order_by(col(ConversationMessageRow.created_at))
+                .limit(limit)
+            ).all()
+        return [_from_row(row) for row in rows]
+
+    def mark_consolidated(self, message_ids: tuple[UUID, ...]) -> None:
+        if not message_ids:
+            return
+        if len(message_ids) > 500 or len(set(message_ids)) != len(message_ids):
+            raise ValueError("consolidation batch must contain unique bounded message IDs")
+        values = tuple(str(message_id) for message_id in message_ids)
+        with self._sqlite._write_lock, Session(self._sqlite.engine) as session:
+            existing = session.exec(
+                select(ConversationMessageRow.message_id).where(
+                    col(ConversationMessageRow.message_id).in_(values)
+                )
+            ).all()
+            if len(existing) != len(values):
+                raise LookupError("conversation message not found")
+            session.exec(
+                update(ConversationMessageRow)
+                .where(col(ConversationMessageRow.message_id).in_(values))
+                .values(consolidation_version=CONSOLIDATION_VERSION)
+            )
+            session.commit()
+
 
 def _to_row(message: ConversationMessage) -> ConversationMessageRow:
     return ConversationMessageRow(
@@ -120,6 +163,7 @@ def _to_row(message: ConversationMessage) -> ConversationMessageRow:
         content=message.content,
         device_id=message.device_id,
         created_at=_dump_datetime(message.created_at),
+        consolidation_version=None,
     )
 
 

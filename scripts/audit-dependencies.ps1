@@ -21,6 +21,9 @@ function Invoke-Checked {
 # - Starlette: TrustedHostMiddleware is mandatory; JARVIS does not authorize from request.url,
 #   parse forms, or use HTTPEndpoint. The UI directory is fixed and local.
 # - Torch: only approved local Silero assets are loaded; no untrusted pt2/JIT artifacts execute.
+# - Setuptools: Torch 2.11 requires setuptools <82 on Python 3.11/Windows. The advisory affects
+#   Unicode-normalization exclusions while producing source distributions on macOS; JARVIS builds
+#   a Windows PyInstaller application and never produces or publishes an sdist.
 $pythonExceptions = @(
     "PYSEC-2026-3552",
     "PYSEC-2026-161",
@@ -29,7 +32,8 @@ $pythonExceptions = @(
     "PYSEC-2026-2281",
     "PYSEC-2026-2280",
     "PYSEC-2026-139",
-    "PYSEC-2025-194"
+    "PYSEC-2025-194",
+    "PYSEC-2026-3447"
 )
 $pythonArguments = @("run", "pip-audit")
 foreach ($advisory in $pythonExceptions) {

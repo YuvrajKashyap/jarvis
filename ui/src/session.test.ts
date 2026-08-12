@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { ServerEvent } from "./generated";
 import {
+  desktopOverlayMovementIntent,
   initialView,
   isReminderNotification,
   reduceServerEvent,
-  shouldRepositionDesktopOverlay,
   shouldRevealDesktopOverlay,
 } from "./session";
 
@@ -19,6 +19,33 @@ const envelope = {
 };
 
 describe("reduceServerEvent", () => {
+  it("surfaces a restrained proactive suggestion without granting it an action", () => {
+    const suggestion: ServerEvent = {
+      ...envelope,
+      type: "proactive_suggestion",
+      payload: {
+        suggestion_id: "019fd977-1d96-7892-950c-6afbb71f7cfd",
+        title: "You have been deep in this for a while",
+        message: "I can help you checkpoint the work before the context gets expensive.",
+        reason: "The same application has stayed in the foreground for 71 minutes.",
+        suggested_prompt: "Help me checkpoint what I am working on.",
+        priority: "quiet",
+        expires_at: "2026-08-07T18:50:00Z",
+        proposed_action: null,
+      },
+    };
+
+    const view = reduceServerEvent(initialView(), suggestion);
+
+    expect(view.suggestion).toMatchObject({
+      title: "You have been deep in this for a while",
+      suggestedPrompt: "Help me checkpoint what I am working on.",
+      priority: "quiet",
+    });
+    expect(shouldRevealDesktopOverlay(suggestion)).toBe(true);
+    expect(desktopOverlayMovementIntent(suggestion)).toBe("proactive");
+  });
+
   it("reveals the desktop overlay for proactive results and active conversation state", () => {
     const reminder: ServerEvent = {
       ...envelope,
@@ -66,9 +93,25 @@ describe("reduceServerEvent", () => {
       },
     };
 
-    expect(shouldRepositionDesktopOverlay(listening)).toBe(true);
-    expect(shouldRepositionDesktopOverlay(thinking)).toBe(false);
-    expect(shouldRepositionDesktopOverlay(reminder)).toBe(true);
+    expect(desktopOverlayMovementIntent(listening)).toBe("conversation");
+    expect(desktopOverlayMovementIntent(thinking)).toBeNull();
+    expect(desktopOverlayMovementIntent(reminder)).toBe("proactive");
+  });
+
+  it("keeps approval cards attached to the conversation that requested them", () => {
+    const approval: ServerEvent = {
+      ...envelope,
+      type: "approval_required",
+      payload: {
+        approval_id: "019fd977-1d96-7892-950c-6afbb71f7cf5",
+        capability: "messages.send",
+        summary: "Send the prepared email",
+        risk: "external_irreversible",
+        expires_at: "2026-08-07T18:31:00Z",
+      },
+    };
+
+    expect(desktopOverlayMovementIntent(approval)).toBeNull();
   });
   it("projects authoritative state changes into the overlay", () => {
     const event: ServerEvent = {

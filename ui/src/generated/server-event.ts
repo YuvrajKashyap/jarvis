@@ -5,7 +5,14 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
-export type ServerEvent = StateChanged | Transcript | AssistantText | ApprovalRequired | CapabilityResult | ErrorEvent;
+export type ServerEvent =
+  | StateChanged
+  | Transcript
+  | AssistantText
+  | ApprovalRequired
+  | CapabilityResult
+  | ProactiveSuggestionEvent
+  | ErrorEvent;
 export type Version = 1;
 export type EventId = string;
 export type SessionId = string;
@@ -77,9 +84,24 @@ export type SessionId5 = string;
 export type TurnId5 = string;
 export type Sequence5 = number;
 export type Timestamp5 = string;
-export type Type5 = "error";
-export type Code = string;
+export type Type5 = "proactive_suggestion";
+export type SuggestionId = string;
+export type Title = string;
 export type Message1 = string;
+export type Reason = string;
+export type SuggestedPrompt = string;
+export type Priority = "quiet" | "normal" | "important";
+export type ExpiresAt1 = string;
+export type ProposedAction = null;
+export type Version6 = 1;
+export type EventId6 = string;
+export type SessionId6 = string;
+export type TurnId6 = string;
+export type Sequence6 = number;
+export type Timestamp6 = string;
+export type Type6 = "error";
+export type Code = string;
+export type Message2 = string;
 export type Recoverable = boolean;
 
 export interface StateChanged {
@@ -160,7 +182,7 @@ export interface CapabilityResultPayload {
   message: Message;
   undo_available: UndoAvailable;
 }
-export interface ErrorEvent {
+export interface ProactiveSuggestionEvent {
   version: Version5;
   event_id: EventId5;
   session_id: SessionId5;
@@ -168,10 +190,30 @@ export interface ErrorEvent {
   sequence: Sequence5;
   timestamp: Timestamp5;
   type: Type5;
+  payload: ProactiveSuggestionPayload;
+}
+export interface ProactiveSuggestionPayload {
+  suggestion_id: SuggestionId;
+  title: Title;
+  message: Message1;
+  reason: Reason;
+  suggested_prompt: SuggestedPrompt;
+  priority: Priority;
+  expires_at: ExpiresAt1;
+  proposed_action?: ProposedAction;
+}
+export interface ErrorEvent {
+  version: Version6;
+  event_id: EventId6;
+  session_id: SessionId6;
+  turn_id: TurnId6;
+  sequence: Sequence6;
+  timestamp: Timestamp6;
+  type: Type6;
   payload: ErrorPayload;
 }
 export interface ErrorPayload {
   code: Code;
-  message: Message1;
+  message: Message2;
   recoverable: Recoverable;
 }

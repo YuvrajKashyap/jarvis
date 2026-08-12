@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import Protocol
 
 import psutil
-from PIL import ImageGrab
+from PIL import Image, ImageFilter, ImageGrab, ImageStat
 
 from jarvis.agency.windows import WindowActionResult, WindowElement, WindowSnapshot
 from jarvis.perception.context import (
     ActiveWindowSnapshot,
     ScreenSnapshot,
     SystemHealthSnapshot,
+)
+from jarvis.perception.placement import (
+    DesktopLayout,
+    PlacementRequest,
+    Rect,
+    placement_regions,
 )
 from jarvis.platform.process import BoundedProcessResult
 
@@ -236,3 +242,84 @@ class WindowsPerception:
             available_memory_bytes=memory.available,
             captured_at=datetime.now(UTC),
         )
+
+
+class WindowsDesktopLayoutProbe:
+    """Builds a transient local occupancy map without encoding or retaining a screenshot."""
+
+    def __init__(self, capture: Callable[[], Image.Image] | None = None) -> None:
+        self._capture = capture or _capture_virtual_desktop
+
+    def inspect(self, request: PlacementRequest) -> DesktopLayout:
+        image = self._capture().convert("L")
+        virtual_left = min(monitor.bounds.left for monitor in request.monitors)
+        virtual_top = min(monitor.bounds.top for monitor in request.monitors)
+        density = {
+            (monitor_index, anchor_index): _visual_density(
+                image,
+                region,
+                virtual_left=virtual_left,
+                virtual_top=virtual_top,
+            )
+            for monitor_index, anchor_index, region in placement_regions(request)
+        }
+        current = Rect(
+            left=request.overlay.left,
+            top=request.overlay.top,
+            width=request.overlay.width,
+            height=request.overlay.height,
+        )
+        return DesktopLayout(
+            region_density=density,
+            current_density=_visual_density(
+                image,
+                current,
+                virtual_left=virtual_left,
+                virtual_top=virtual_top,
+            ),
+            attention=_attention_region(request),
+        )
+
+
+def _capture_virtual_desktop() -> Image.Image:
+    return ImageGrab.grab(all_screens=True, include_layered_windows=False)
+
+
+def _attention_region(request: PlacementRequest) -> Rect:
+    monitor = next(
+        (item for item in request.monitors if item.bounds.contains(request.pointer)),
+        request.monitors[0],
+    )
+    width = min(720, monitor.work_area.width)
+    height = min(520, monitor.work_area.height)
+    left = round(request.pointer.x - width / 2)
+    top = round(request.pointer.y - height / 2)
+    return Rect(
+        left=max(monitor.work_area.left, min(left, monitor.work_area.right - width)),
+        top=max(monitor.work_area.top, min(top, monitor.work_area.bottom - height)),
+        width=width,
+        height=height,
+    )
+
+
+def _visual_density(
+    image: Image.Image,
+    region: Rect,
+    *,
+    virtual_left: int,
+    virtual_top: int,
+) -> float:
+    left = max(0, region.left - virtual_left)
+    top = max(0, region.top - virtual_top)
+    right = min(image.width, region.right - virtual_left)
+    bottom = min(image.height, region.bottom - virtual_top)
+    if right <= left or bottom <= top:
+        return 1.0
+    sample = image.crop((left, top, right, bottom))
+    sample.thumbnail((192, 128), Image.Resampling.BILINEAR)
+    if sample.width < 3 or sample.height < 3:
+        return 1.0
+    edges = sample.filter(ImageFilter.FIND_EDGES).crop((1, 1, sample.width - 1, sample.height - 1))
+    edge_mean = ImageStat.Stat(edges).mean[0] / 255
+    contrast = min(ImageStat.Stat(sample).stddev[0] / 72, 1)
+    return min(edge_mean * 2.8 + contrast * 0.35, 1)

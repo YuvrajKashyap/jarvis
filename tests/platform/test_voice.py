@@ -29,8 +29,8 @@ async def test_chatterbox_is_lazy_conditions_once_and_emits_bounded_pcm(tmp_path
     model = FakeChatterbox()
     loads: list[str] = []
 
-    def load(device: str) -> FakeChatterbox:
-        loads.append(device)
+    def load(device: str, nano: bool) -> FakeChatterbox:
+        loads.append(f"{device}:{nano}")
         return model
 
     voice = ChatterboxTurboSynthesizer(
@@ -41,7 +41,7 @@ async def test_chatterbox_is_lazy_conditions_once_and_emits_bounded_pcm(tmp_path
     first = await voice.synthesize("Good evening, Yuvraj.")
     second = await voice.synthesize("The build is green.")
 
-    assert loads == ["cpu"]
+    assert loads == ["cpu:False"]
     assert model.reference == str(reference)
     assert model.requests == ["Good evening, Yuvraj.", "The build is green."]
     assert first.sample_rate == second.sample_rate == 24_000
@@ -67,13 +67,30 @@ async def test_chatterbox_rejects_empty_and_unbounded_text(tmp_path: Path) -> No
     reference.write_bytes(b"voice")
     voice = ChatterboxTurboSynthesizer(
         reference_path=reference,
-        loader=lambda _device: FakeChatterbox(),
+        loader=lambda _device, _nano: FakeChatterbox(),
     )
 
     with pytest.raises(ValueError, match="cannot be empty"):
         await voice.synthesize("  ")
     with pytest.raises(ValueError, match="4000"):
         await voice.synthesize("x" * 4_001)
+
+
+@pytest.mark.asyncio
+async def test_nano_voice_uses_the_low_compute_model(tmp_path: Path) -> None:
+    reference = tmp_path / "reference.wav"
+    reference.write_bytes(b"voice")
+    loads: list[tuple[str, bool]] = []
+    voice = ChatterboxTurboSynthesizer(
+        reference_path=reference,
+        device="cpu",
+        nano=True,
+        loader=lambda device, nano: loads.append((device, nano)) or FakeChatterbox(),
+    )
+
+    await voice.synthesize("Good evening.")
+
+    assert loads == [("cpu", True)]
 
 
 class FakeSoundDevice:

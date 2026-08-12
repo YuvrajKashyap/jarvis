@@ -42,7 +42,10 @@ flowchart LR
 - Foreground desktop operation uses Microsoft's UI Automation control patterns through the bounded `winapp` CLI adapter. Exact foreground-window handles, typed selectors, timeouts, output limits, and the policy engine constrain every operation; raw input injection is not exposed.
 - Explicit private, meeting, lecture, and ambient-memory modes share one speech state machine. Ambient transcripts cannot invoke the assistant or authorize actions.
 - Durable memory writes carry the originating conversation event, queue conflicts without overwrite, and expose exact audited undo references. Scheduled reminders re-enter policy and surface through both the overlay and native Windows notifications.
+- Idle consolidation extracts bounded explicit user statements into sourced identity, preference, person, project, decision, device, and unfinished-work facts. A consolidation-version bump deliberately reprocesses older conversations when extraction coverage expands; conflicts still require review.
+- Canonical Markdown memory can be staged back into SQLite only after strict IDs and versions are validated. Edits become reviewable conflicts rather than silently replacing canonical facts.
 - SQLite is backed up transactionally at startup and daily with bounded retention. Packaged logs are rotating structured JSON with credential redaction. Build artifacts include separate CycloneDX SBOMs for Python, Node, and Rust.
+- Recovery validates SQLite integrity and migration metadata, preserves a pre-restore rollback database, copies through SQLite's backup API, and atomically replaces only a stopped destination.
 - The Python core, browser, scheduler, model residency, and SQLite store share one ordered application lifecycle so startup rollback and shutdown do not strand background work.
 
 ## Dependency direction
@@ -66,3 +69,11 @@ Pydantic models are the source of truth for versioned REST and WebSocket contrac
 ## Resource invariant
 
 Only one heavy local model may be resident. JARVIS may unload or fall back, but it never closes user applications, changes GPU preferences, or hides resource pressure. Queues, prompts, captures, subprocess output, and audio buffers are bounded.
+
+## Readiness invariant
+
+Software verification, installed prerequisites, and product acceptance are separate facts. The
+authenticated diagnostics surface module availability, configuration, measured acceptance,
+pairing, model residency, and current resource pressure independently. Model attempts persist a
+completed score or a typed safety/timeout/provider failure, and only a fully qualifying result can
+become the selected primary model.

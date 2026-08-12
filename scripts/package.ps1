@@ -1,3 +1,5 @@
+param([switch]$SkipVerify)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -16,7 +18,9 @@ function Invoke-Checked {
     }
 }
 
-& (Join-Path $PSScriptRoot "verify.ps1")
+if (-not $SkipVerify) {
+    & (Join-Path $PSScriptRoot "verify.ps1")
+}
 & (Join-Path $PSScriptRoot "generate-sbom.ps1")
 
 $sidecarDirectory = Join-Path $workspace "src-tauri\resources\jarvis-core"
@@ -34,10 +38,14 @@ if (Test-Path -LiteralPath $resolvedSidecar) {
 }
 
 Invoke-Checked "uv" @(
-    "run", "pyinstaller", "--noconfirm", "--clean", "--onedir", "--name", "jarvis-core",
+    "run", "--extra", "speech", "pyinstaller", "--noconfirm", "--clean", "--onedir",
+    "--name", "jarvis-core",
     "--distpath", "src-tauri/resources", "--specpath", "build/pyinstaller",
-    "--paths", $sourceDirectory, "--collect-submodules",
-    "jarvis.platform.migrations", "--add-data",
+    "--paths", $sourceDirectory, "--collect-submodules", "jarvis.platform.migrations",
+    "--collect-all", "openwakeword", "--collect-all", "silero_vad",
+    "--collect-all", "faster_whisper", "--collect-all", "chatterbox",
+    "--collect-all", "sounddevice", "--hidden-import", "onnxruntime",
+    "--hidden-import", "ctranslate2", "--add-data",
     "$migrationsDirectory;jarvis/platform/migrations", "--add-data",
     "$uiDistribution;jarvis/ui_dist", $entryPoint
 )
@@ -50,4 +58,8 @@ Invoke-Checked "pnpm" @("tauri", "build")
 Invoke-Checked "uv" @(
     "run", "python", "scripts/desktop_acceptance.py",
     "src-tauri/target/release/jarvis-host.exe"
+)
+Invoke-Checked "uv" @(
+    "run", "python", "scripts/packaged_core_acceptance.py",
+    "src-tauri/resources/jarvis-core/jarvis-core.exe"
 )

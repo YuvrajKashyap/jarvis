@@ -10,6 +10,7 @@ from jarvis.platform.protocol import (
     AssistantText,
     Interrupt,
     ModeChange,
+    ProactiveSuggestionEvent,
     StateChanged,
     SubmitText,
     TransferDevice,
@@ -183,3 +184,33 @@ def test_server_text_event_has_a_bounded_nonempty_delta() -> None:
             type="assistant_text",
             payload={"text": "", "is_final": False},
         )
+
+
+def test_proactive_suggestion_is_observe_only_and_explains_why_it_appeared() -> None:
+    event = ProactiveSuggestionEvent(
+        version=1,
+        event_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf4"),
+        session_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf1"),
+        turn_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf2"),
+        sequence=8,
+        timestamp=datetime(2026, 8, 10, 20, 0, tzinfo=UTC),
+        type="proactive_suggestion",
+        payload={
+            "suggestion_id": "019fd977-1d96-7892-950c-6afbb71f7cf5",
+            "title": "Research PDF is ready",
+            "message": "The PDF finished downloading. Want me to summarize or file it?",
+            "reason": "A new completed PDF appeared in Downloads.",
+            "suggested_prompt": "Summarize the new PDF in Downloads.",
+            "priority": "quiet",
+            "expires_at": "2026-08-10T22:00:00Z",
+            "proposed_action": None,
+        },
+    )
+
+    serialized = serialize_server_event(event)
+
+    assert serialized["type"] == "proactive_suggestion"
+    payload = serialized["payload"]
+    assert isinstance(payload, dict)
+    assert payload["proposed_action"] is None
+    assert payload["reason"] == "A new completed PDF appeared in Downloads."

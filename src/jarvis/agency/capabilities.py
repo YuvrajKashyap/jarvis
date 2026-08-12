@@ -159,6 +159,9 @@ class CapabilityRegistry:
     def get(self, name: str) -> Capability | None:
         return self._capabilities.get(name)
 
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._capabilities)
+
     def tool_schemas(self) -> tuple[ToolSchema, ...]:
         return tuple(
             ToolSchema(

@@ -29,6 +29,7 @@ def test_composition_root_creates_local_state_without_external_connections(tmp_p
     assert len(secrets.get("api-token") or "") >= 32
     assert [schema.name for schema in application.state.capabilities.tool_schemas()] == [
         "context.active_window",
+        "context.local_time",
         "system.health",
         "files.read_text",
         "files.write_text",
@@ -51,9 +52,11 @@ def test_composition_root_creates_local_state_without_external_connections(tmp_p
     assert application.state.browser is not None
     assert application.state.windows_automation is not None
     assert application.state.scheduler is not None
+    assert application.state.proactivity is not None
     assert application.state.backups is not None
     assert application.state.memory_retrieval is not None
     assert application.state.turn_context is not None
+    assert application.state.diagnostics is not None
 
 
 def test_composition_root_reuses_api_secret_across_restarts(tmp_path: Path) -> None:
@@ -104,6 +107,27 @@ def test_default_runtime_keeps_the_measured_primary_model_resident() -> None:
     assert settings.primary_model == "qwen3.5:4b-q4_K_M"
     assert settings.model_context_length == 4_096
     assert settings.model_prewarm_enabled is True
+
+
+def test_composition_uses_the_model_that_passed_quality_acceptance(tmp_path: Path) -> None:
+    acceptance = tmp_path / "data" / "acceptance"
+    acceptance.mkdir(parents=True)
+    (acceptance / "model-quality.json").write_text(
+        '{"schema_version":1,"passed":true,"subject":"qualified:model",'
+        '"completed_at":"2026-08-11T12:00:00Z"}',
+        encoding="utf-8",
+    )
+    settings = BootstrapSettings(
+        data_directory=tmp_path / "data",
+        memory_directory=tmp_path / "Memory",
+        file_roots=(tmp_path,),
+        desktop_speech_enabled=False,
+        model_prewarm_enabled=False,
+    )
+
+    application = build_application(settings=settings, secrets=InMemorySecretStore())
+
+    assert application.state.primary_model == "qualified:model"
 
 
 def test_default_runtime_allows_the_packaged_windows_webview_origin() -> None:

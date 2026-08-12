@@ -10,12 +10,120 @@ function view(overrides: Partial<OverlayView> = {}): OverlayView {
     state: "listening",
     transcript: [],
     approval: null,
+    suggestion: null,
     detail: null,
     ...overrides,
   };
 }
 
 describe("ConversationOverlay", () => {
+  it("plainly surfaces blocked and unverified product readiness", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({ state: "idle" })}
+        readiness={{
+          overall: "blocked",
+          generated_at: "2026-08-11T15:30:00Z",
+          checks: [
+            {
+              code: "model_quality",
+              state: "unverified",
+              summary: "The selected model has not passed the JARVIS quality suite.",
+              detail: null,
+            },
+            {
+              code: "resources",
+              state: "blocked",
+              summary: "Current resource pressure prevents a safe model workload.",
+              detail: "0.2 GiB available; GPU 78 C.",
+            },
+          ],
+        }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Not daily-ready")).toBeVisible();
+    fireEvent.click(screen.getByText("2 checks need attention"));
+    expect(screen.getByText(/selected model has not passed/i)).toBeVisible();
+    expect(screen.getByText(/resource pressure prevents/i)).toBeVisible();
+    expect(screen.getByText("0.2 GiB available; GPU 78 C.")).toBeVisible();
+    rendered.unmount();
+  });
+
+  it("offers a proactive thought without implying that JARVIS acted", () => {
+    const onSubmit = vi.fn();
+    const onDismissSuggestion = vi.fn();
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          state: "idle",
+          suggestion: {
+            id: "suggestion-1",
+            title: "You have been deep in this for a while",
+            message: "I can help you checkpoint the work before the context gets expensive.",
+            reason: "The same application has stayed in the foreground for 71 minutes.",
+            suggestedPrompt: "Help me checkpoint what I am working on.",
+            priority: "quiet",
+          },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={onSubmit}
+        onActivate={vi.fn()}
+        onDismissSuggestion={onDismissSuggestion}
+      />,
+    );
+
+    const scope = within(rendered.container);
+    expect(scope.getByRole("region", { name: "JARVIS suggestion" })).toBeVisible();
+    expect(scope.getByText("Why I mentioned it")).toBeVisible();
+    expect(scope.queryByText(/I fixed|I changed|I closed/i)).not.toBeInTheDocument();
+    fireEvent.click(scope.getByRole("button", { name: "Talk it through" }));
+    expect(onSubmit).toHaveBeenCalledWith("Help me checkpoint what I am working on.");
+    expect(onDismissSuggestion).toHaveBeenCalledTimes(1);
+    rendered.unmount();
+  });
+
+  it("lets a quiet suggestion disappear without starting a conversation", () => {
+    const onSubmit = vi.fn();
+    const onDismissSuggestion = vi.fn();
+    const rendered = render(
+      <ConversationOverlay
+        surface="desktop"
+        view={view({
+          state: "idle",
+          suggestion: {
+            id: "suggestion-1",
+            title: "A download just finished",
+            message: "I can help you decide what to do with it.",
+            reason: "A new download finished and stopped changing.",
+            suggestedPrompt: "Help me inspect the new download.",
+            priority: "quiet",
+          },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={onSubmit}
+        onActivate={vi.fn()}
+        onDismissSuggestion={onDismissSuggestion}
+      />,
+    );
+
+    fireEvent.click(within(rendered.container).getByRole("button", { name: "Not now" }));
+    expect(onDismissSuggestion).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    rendered.unmount();
+  });
+
   it("shows immediate listening feedback without generic filler", () => {
     const onSubmit = vi.fn();
     render(
@@ -124,6 +232,26 @@ describe("ConversationOverlay", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("gives the paired iPhone exact Home Screen and Action Button setup guidance", () => {
+    const rendered = render(
+      <ConversationOverlay
+        surface="phone"
+        view={view({ state: "idle" })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSubmit={vi.fn()}
+        onActivate={vi.fn()}
+      />,
+    );
+
+    const scope = within(rendered.container);
+    fireEvent.click(scope.getByText("Keep JARVIS one tap away"));
+    expect(scope.getByText(/Share, then Add to Home Screen/i)).toBeVisible();
+    expect(scope.getByText(/Action Button/i)).toBeVisible();
+    expect(scope.getByText(/Siri/i)).toBeVisible();
+  });
+
   it("keeps the newest exchange visible as the conversation grows", () => {
     const rendered = render(
       <ConversationOverlay
@@ -188,6 +316,34 @@ describe("ConversationOverlay", () => {
     expect(stylesheet).toMatch(/\.message-box\s*{[^}]*margin:\s*12px 16px 16px;/s);
   });
 
+  it("renders the desktop glass without a hard perimeter seam", () => {
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = readFileSync("ui/src/overlay.css", "utf8");
+    document.head.append(stylesheet);
+    try {
+      const rendered = render(
+        <ConversationOverlay
+          surface="desktop"
+          view={view()}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+          onInterrupt={vi.fn()}
+          onSubmit={vi.fn()}
+          onActivate={vi.fn()}
+        />,
+      );
+
+      const overlay = within(rendered.container).getByLabelText("JARVIS conversation");
+      const style = getComputedStyle(overlay);
+
+      expect(style.borderLeftWidth).toBe("0px");
+      expect(style.borderRightWidth).toBe("0px");
+      expect(style.boxShadow).toBe("none");
+    } finally {
+      stylesheet.remove();
+    }
+  });
+
   it("lets desktop content define the native overlay height without taking over the screen", () => {
     const stylesheet = readFileSync("ui/src/overlay.css", "utf8");
 
@@ -198,6 +354,22 @@ describe("ConversationOverlay", () => {
     expect(stylesheet).toMatch(
       /\.overlay--desktop\s+\.transcript\s*{[^}]*max-height:\s*280px;[^}]*flex:\s*0\s+1\s+auto;/s,
     );
+  });
+
+  it("morphs into a dedicated orb surface during native relocation", () => {
+    const stylesheet = readFileSync("ui/src/overlay.css", "utf8");
+
+    expect(stylesheet).toMatch(/\.transit-orb\s*{/);
+    expect(stylesheet).toMatch(
+      /html\[data-overlay-transit="local"\][^{]*\.transit-orb\s*{[^}]*opacity:\s*1;/s,
+    );
+    expect(stylesheet).toMatch(
+      /html\[data-overlay-transit="cross-monitor"\][^{]*\.overlay__content\s*{[^}]*opacity:\s*0;/s,
+    );
+    expect(stylesheet).not.toMatch(
+      /html\[data-overlay-transit="resize"\][^{]*\.(?:transit-orb|overlay__content)/s,
+    );
+    expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce/);
   });
 
   it("makes the exact external action explicit before approval", () => {
@@ -258,7 +430,7 @@ describe("ConversationOverlay", () => {
     fireEvent.click(scope.getByRole("button", { name: "Try again" }));
     expect(onRetryConnection).toHaveBeenCalledOnce();
     expect(
-      screen.queryByText(/apple intelligence|siri|fallback assistant/i),
+      scope.queryByText(/apple intelligence|siri|fallback assistant/i),
     ).not.toBeInTheDocument();
   });
 

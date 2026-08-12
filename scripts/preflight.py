@@ -2,6 +2,7 @@ import contextlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ class PreflightValue(BaseModel):
 
 
 class ObservedEnvironment(PreflightValue):
+    primary_model: str = PRIMARY_MODEL
     available_commands: frozenset[str]
     primary_model_installed: bool
     model_capabilities: frozenset[str]
@@ -38,11 +40,20 @@ class ObservedEnvironment(PreflightValue):
     voice_reference_configured: bool
     installer_built: bool
     available_memory_bytes: int = Field(ge=0)
+    model_quality_verified: bool
+    installed_product_verified: bool
+    speech_pipeline_verified: bool
+    capability_acceptance_verified: bool
+    recovery_verified: bool
+    resource_soak_verified: bool
+    phone_device_paired: bool
+    iphone_acceptance_verified: bool
+    acoustic_acceptance_verified: bool
 
 
 class ReadinessItem(PreflightValue):
     code: str
-    status: Literal["ready", "blocked", "manual", "pending", "transient"]
+    status: Literal["ready", "blocked", "manual", "pending", "transient", "unverified"]
     detail: str
 
 
@@ -52,6 +63,7 @@ class ReadinessReport(PreflightValue):
     software_blockers: tuple[ReadinessItem, ...]
     manual_steps: tuple[ReadinessItem, ...]
     automation_complete: bool
+    product_ready: bool
 
 
 def evaluate_readiness(observed: ObservedEnvironment) -> ReadinessReport:
@@ -67,8 +79,8 @@ def evaluate_readiness(observed: ObservedEnvironment) -> ReadinessReport:
         _item(
             "primary_model",
             observed.primary_model_installed,
-            f"{PRIMARY_MODEL} is installed locally.",
-            f"{PRIMARY_MODEL} is not installed in Ollama.",
+            f"{observed.primary_model} is installed locally.",
+            f"{observed.primary_model} is not installed in Ollama.",
         ),
         _item(
             "model_capabilities",
@@ -148,38 +160,106 @@ def evaluate_readiness(observed: ObservedEnvironment) -> ReadinessReport:
                 "applications or force the model to load."
             ),
         ),
+        _acceptance_item(
+            "model_quality_acceptance",
+            observed.model_quality_verified,
+            "The selected model passed the complete JARVIS quality and safety evaluation.",
+            "No passing model-quality evidence exists for the selected model.",
+        ),
+        _acceptance_item(
+            "installed_product_acceptance",
+            observed.installed_product_verified,
+            "The installed desktop product passed end-to-end acceptance.",
+            "The installed desktop product has not passed end-to-end acceptance.",
+        ),
+        _acceptance_item(
+            "speech_pipeline_acceptance",
+            observed.speech_pipeline_verified,
+            "The packaged wake, transcription, synthesis, and interruption path passed.",
+            "The packaged speech pipeline has not passed real end-to-end acceptance.",
+        ),
+        _acceptance_item(
+            "capability_acceptance",
+            observed.capability_acceptance_verified,
+            "The capability, permission, approval, cancellation, and undo scenarios passed.",
+            "Real capability and authorization scenarios have not passed acceptance.",
+        ),
+        _acceptance_item(
+            "recovery_acceptance",
+            observed.recovery_verified,
+            "Restart, migration, upgrade, and recovery scenarios passed.",
+            "Restart, migration, upgrade, and recovery scenarios remain unverified.",
+        ),
+        _acceptance_item(
+            "resource_soak_acceptance",
+            observed.resource_soak_verified,
+            "Active and idle resource-soak acceptance passed.",
+            "The required active and idle resource-soak runs have not passed.",
+        ),
         ReadinessItem(
             code="iphone_acceptance",
-            status="manual",
+            status=(
+                "ready"
+                if (
+                    observed.tailscale_online
+                    and observed.tailscale_serve_enabled
+                    and observed.phone_base_url_configured
+                    and observed.phone_device_paired
+                    and observed.iphone_acceptance_verified
+                )
+                else "manual"
+            ),
             detail=(
-                "Install, pair, and verify the PWA on the physical iPhone 17 Pro after Serve is "
-                "enabled."
+                "The physical iPhone 17 Pro passed pairing, conversation, interruption, "
+                "reconnection, notification, and unavailable-state acceptance."
+                if (
+                    observed.tailscale_online
+                    and observed.tailscale_serve_enabled
+                    and observed.phone_base_url_configured
+                    and observed.phone_device_paired
+                    and observed.iphone_acceptance_verified
+                )
+                else (
+                    "The iPhone is not paired; pair it and run the physical phone acceptance."
+                    if not observed.phone_device_paired
+                    else "Run the physical iPhone conversation and network acceptance."
+                )
             ),
         ),
         ReadinessItem(
             code="acoustic_acceptance",
-            status="manual",
+            status=(
+                "ready"
+                if observed.voice_reference_configured and observed.acoustic_acceptance_verified
+                else "manual"
+            ),
             detail=(
-                "Run personalized wake-word, echo, barge-in, and selected-voice checks in the "
-                "real room."
+                "Personalized wake-word, echo, barge-in, and selected-voice acceptance passed."
+                if observed.voice_reference_configured and observed.acoustic_acceptance_verified
+                else "Run personalized wake-word, echo, barge-in, and selected-voice checks in "
+                "the real room."
             ),
         ),
     )
     blockers = tuple(item for item in items if item.status == "blocked")
     manual = tuple(item for item in items if item.status == "manual")
+    unverified = tuple(item for item in items if item.status == "unverified")
     return ReadinessReport(
         generated_at=datetime.now(UTC),
         items=items,
         software_blockers=blockers,
         manual_steps=manual,
-        automation_complete=not blockers,
+        automation_complete=not blockers and not unverified,
+        product_ready=all(item.status == "ready" for item in items),
     )
 
 
 def collect_environment() -> ObservedEnvironment:
     data_directory = _data_directory()
     model_directory = data_directory / "models"
-    installed_models, capabilities = _ollama_state()
+    acceptance_directory = data_directory / "acceptance"
+    primary_model = _accepted_subject(acceptance_directory / "model-quality.json") or PRIMARY_MODEL
+    installed_models, capabilities = _ollama_state(primary_model)
     tailscale_online, serve_enabled = _tailscale_state()
     config = _read_json(data_directory / "config.json")
     voice_path = os.environ.get("JARVIS_VOICE_REFERENCE_PATH")
@@ -189,8 +269,9 @@ def collect_environment() -> ObservedEnvironment:
     wake_directory = model_directory / "openwakeword"
     whisper_directory = model_directory / "faster-whisper" / "distil-small.en"
     return ObservedEnvironment(
+        primary_model=primary_model,
         available_commands=available_commands,
-        primary_model_installed=PRIMARY_MODEL in installed_models,
+        primary_model_installed=primary_model in installed_models,
         model_capabilities=frozenset(capabilities),
         wake_assets_ready=all(
             (wake_directory / name).is_file()
@@ -213,6 +294,22 @@ def collect_environment() -> ObservedEnvironment:
             )
         ),
         available_memory_bytes=psutil.virtual_memory().available,
+        model_quality_verified=_acceptance_passed(
+            acceptance_directory / "model-quality.json",
+            subject=primary_model,
+        ),
+        installed_product_verified=_acceptance_passed(
+            acceptance_directory / "installed-product.json"
+        ),
+        speech_pipeline_verified=_acceptance_passed(acceptance_directory / "speech-pipeline.json"),
+        capability_acceptance_verified=_acceptance_passed(
+            acceptance_directory / "capabilities.json"
+        ),
+        recovery_verified=_acceptance_passed(acceptance_directory / "recovery.json"),
+        resource_soak_verified=_acceptance_passed(acceptance_directory / "resource-soak.json"),
+        phone_device_paired=_paired_device_exists(data_directory / "jarvis.db"),
+        iphone_acceptance_verified=_acceptance_passed(acceptance_directory / "iphone.json"),
+        acoustic_acceptance_verified=_acceptance_passed(acceptance_directory / "acoustic.json"),
     )
 
 
@@ -246,6 +343,19 @@ def _item(
     )
 
 
+def _acceptance_item(
+    code: str,
+    verified: bool,
+    ready_detail: str,
+    unverified_detail: str,
+) -> ReadinessItem:
+    return ReadinessItem(
+        code=code,
+        status="ready" if verified else "unverified",
+        detail=ready_detail if verified else unverified_detail,
+    )
+
+
 def _data_directory() -> Path:
     base = os.environ.get("LOCALAPPDATA")
     return (Path(base) if base else Path.home() / ".local" / "share") / "JARVIS"
@@ -257,7 +367,7 @@ def _command_available(command: str) -> bool:
     return command == "cargo" and (Path.home() / ".cargo" / "bin" / "cargo.exe").is_file()
 
 
-def _ollama_state() -> tuple[set[str], set[str]]:
+def _ollama_state(primary_model: str = PRIMARY_MODEL) -> tuple[set[str], set[str]]:
     try:
         with httpx.Client(base_url="http://127.0.0.1:11434", timeout=5) as client:
             tags = client.get("/api/tags")
@@ -267,9 +377,9 @@ def _ollama_state() -> tuple[set[str], set[str]]:
                 for item in tags.json().get("models", [])
                 if isinstance(item, dict)
             }
-            if PRIMARY_MODEL not in installed:
+            if primary_model not in installed:
                 return installed, set()
-            shown = client.post("/api/show", json={"model": PRIMARY_MODEL})
+            shown = client.post("/api/show", json={"model": primary_model})
             shown.raise_for_status()
             raw_capabilities = shown.json().get("capabilities", [])
             capabilities = {str(value) for value in raw_capabilities if isinstance(value, str)}
@@ -322,6 +432,39 @@ def _read_json(path: Path) -> dict[str, object]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _acceptance_passed(path: Path, *, subject: str | None = None) -> bool:
+    payload = _read_json(path)
+    return (
+        payload.get("schema_version") == 1
+        and payload.get("passed") is True
+        and (subject is None or payload.get("subject") == subject)
+    )
+
+
+def _accepted_subject(path: Path) -> str | None:
+    payload = _read_json(path)
+    subject = payload.get("subject")
+    if (
+        payload.get("schema_version") == 1
+        and payload.get("passed") is True
+        and isinstance(subject, str)
+        and subject.strip()
+    ):
+        return subject
+    return None
+
+
+def _paired_device_exists(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=1) as connection:
+            row = connection.execute("SELECT 1 FROM paired_device LIMIT 1").fetchone()
+            return row is not None
+    except sqlite3.Error:
+        return False
 
 
 def _microphone_available() -> bool:

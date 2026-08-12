@@ -179,6 +179,29 @@ class CapabilityResult(EventEnvelope):
     payload: CapabilityResultPayload
 
 
+class ProactiveSuggestionPayload(ProtocolModel):
+    suggestion_id: UUID
+    title: Annotated[str, Field(min_length=1, max_length=120)]
+    message: Annotated[str, Field(min_length=1, max_length=1_000)]
+    reason: Annotated[str, Field(min_length=1, max_length=500)]
+    suggested_prompt: Annotated[str, Field(min_length=1, max_length=2_000)]
+    priority: Literal["quiet", "normal", "important"]
+    expires_at: datetime
+    proposed_action: None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def require_suggestion_expiry_timezone(cls, timestamp: datetime) -> datetime:
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError("expires_at must include a UTC offset")
+        return timestamp
+
+
+class ProactiveSuggestionEvent(EventEnvelope):
+    type: Literal["proactive_suggestion"]
+    payload: ProactiveSuggestionPayload
+
+
 class ErrorPayload(ProtocolModel):
     code: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")]
     message: Annotated[str, Field(min_length=1, max_length=1_000)]
@@ -191,7 +214,13 @@ class ErrorEvent(EventEnvelope):
 
 
 ServerEvent: TypeAlias = Annotated[
-    StateChanged | Transcript | AssistantText | ApprovalRequired | CapabilityResult | ErrorEvent,
+    StateChanged
+    | Transcript
+    | AssistantText
+    | ApprovalRequired
+    | CapabilityResult
+    | ProactiveSuggestionEvent
+    | ErrorEvent,
     Field(discriminator="type"),
 ]
 

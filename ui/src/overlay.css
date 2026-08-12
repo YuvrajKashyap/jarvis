@@ -69,6 +69,137 @@ button {
   width: calc(100vw - (var(--surface-inset) * 2));
   height: auto;
   flex-direction: column;
+  border: 0;
+  background:
+    linear-gradient(112deg, rgba(121, 175, 200, 0.09), transparent 42%),
+    radial-gradient(140% 180% at 50% 12%, rgba(16, 24, 33, 0.9), rgba(8, 13, 19, 0.84));
+  box-shadow: none;
+}
+
+.overlay__content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  transition:
+    opacity 140ms ease-out,
+    filter 180ms ease-out,
+    transform 220ms var(--ease-out);
+}
+
+.transit-orb {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  left: 50%;
+  width: min(58px, calc(100vw - 12px));
+  aspect-ratio: 1;
+  pointer-events: none;
+  opacity: 0;
+  filter: drop-shadow(0 0 18px rgba(121, 175, 200, 0.34));
+  transform: translate(-50%, -50%) scale(0.58);
+  transition:
+    opacity 100ms ease-out,
+    transform 180ms var(--ease-out);
+}
+
+.transit-orb__core,
+.transit-orb__orbit,
+.transit-orb__wake {
+  position: absolute;
+  border-radius: 999px;
+}
+
+.transit-orb__core {
+  inset: 32%;
+  background: radial-gradient(
+    circle at 38% 34%,
+    #ffffff 0 8%,
+    var(--ion-bright) 26%,
+    var(--ion) 54%,
+    rgba(31, 83, 106, 0.76) 72%,
+    transparent 74%
+  );
+  box-shadow:
+    0 0 10px rgba(197, 230, 242, 0.9),
+    0 0 24px rgba(121, 175, 200, 0.66);
+  animation: orb-breathe 680ms ease-in-out infinite alternate;
+}
+
+.transit-orb__orbit {
+  border: 1px solid rgba(197, 230, 242, 0.72);
+}
+
+.transit-orb__orbit--outer {
+  inset: 5%;
+  border-block-color: rgba(197, 230, 242, 0.16);
+  transform: rotate(-24deg);
+  animation: orb-orbit 900ms linear infinite;
+}
+
+.transit-orb__orbit--inner {
+  inset: 19%;
+  border-inline-color: rgba(121, 175, 200, 0.18);
+  transform: rotate(32deg);
+  animation: orb-orbit 620ms linear infinite reverse;
+}
+
+.transit-orb__wake {
+  inset: 42% 72% 42% -62%;
+  background: linear-gradient(90deg, transparent, rgba(121, 175, 200, 0.28));
+  filter: blur(3px);
+}
+
+html[data-overlay-transit="local"],
+html[data-overlay-transit="cross-monitor"],
+html[data-overlay-transit="local"] body,
+html[data-overlay-transit="cross-monitor"] body,
+html[data-overlay-transit="local"] #root,
+html[data-overlay-transit="cross-monitor"] #root {
+  min-width: 0;
+  min-height: 0;
+}
+
+html[data-overlay-transit="local"] .overlay--desktop,
+html[data-overlay-transit="cross-monitor"] .overlay--desktop {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html[data-overlay-transit="local"] .overlay__content,
+html[data-overlay-transit="cross-monitor"] .overlay__content {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(0.96);
+}
+
+html[data-overlay-transit="local"] .transit-orb,
+html[data-overlay-transit="cross-monitor"] .transit-orb {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+html[data-overlay-transit="cross-monitor"] .transit-orb {
+  filter: drop-shadow(0 0 24px rgba(121, 175, 200, 0.48));
+}
+
+@keyframes orb-orbit {
+  to {
+    transform: rotate(336deg);
+  }
+}
+
+@keyframes orb-breathe {
+  to {
+    transform: scale(1.16);
+  }
 }
 
 .status-row {
@@ -258,6 +389,106 @@ button {
   background: rgba(240, 170, 99, 0.055);
 }
 
+.suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 22px;
+  align-items: end;
+  padding: 17px 18px 5px;
+  background: linear-gradient(90deg, rgba(121, 175, 200, 0.055), transparent 68%);
+}
+
+.suggestion--important {
+  background: linear-gradient(90deg, rgba(240, 170, 99, 0.07), transparent 72%);
+}
+
+.suggestion__signal {
+  color: var(--ion);
+  font-size: 0.72rem;
+  font-weight: 560;
+}
+
+.suggestion h2 {
+  margin: 4px 0 5px;
+  font-family: Bahnschrift, "Arial Narrow", sans-serif;
+  font-size: 1.02rem;
+  font-weight: 520;
+  line-height: 1.25;
+}
+
+.suggestion__copy > p,
+.suggestion__reason p {
+  margin: 0;
+  color: #c8d2da;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.suggestion__reason {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.suggestion__reason summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.suggestion__reason p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.suggestion__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.suggestion__tuning {
+  position: relative;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.suggestion__tuning summary {
+  cursor: pointer;
+  padding: 8px 5px;
+}
+
+.suggestion__tuning > div {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: calc(100% + 7px);
+  display: grid;
+  min-width: 142px;
+  padding: 6px;
+  border: 1px solid rgba(146, 190, 210, 0.18);
+  border-radius: 12px;
+  background: rgba(8, 17, 25, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.suggestion__tuning button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: #c8d2da;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion__tuning button:hover {
+  color: white;
+  background: rgba(135, 210, 240, 0.08);
+}
+
 .approval h2 {
   margin: 3px 0 5px;
   font-family: Bahnschrift, "Arial Narrow", sans-serif;
@@ -292,6 +523,91 @@ button {
     transform 120ms var(--ease-out),
     border-color 160ms ease,
     background-color 160ms ease;
+}
+
+.readiness {
+  margin: 10px 16px 2px;
+  border: 1px solid rgba(240, 177, 91, 0.24);
+  border-radius: 12px;
+  color: var(--frost);
+  background: rgba(41, 28, 13, 0.3);
+}
+
+.readiness--blocked {
+  border-color: rgba(240, 111, 91, 0.28);
+  background: rgba(47, 17, 16, 0.32);
+}
+
+.readiness summary {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 0.76rem;
+}
+
+.readiness summary span:first-child {
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.readiness summary span:last-child {
+  color: var(--muted);
+}
+
+.readiness ol {
+  display: grid;
+  max-height: 248px;
+  gap: 10px;
+  overflow: auto;
+  margin: 0;
+  padding: 3px 12px 12px;
+  list-style: none;
+}
+
+.readiness li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 9px;
+}
+
+.readiness__state {
+  margin-top: 2px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: var(--muted);
+  background: rgba(190, 225, 239, 0.08);
+  font-size: 0.61rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.readiness__state--blocked,
+.readiness__state--degraded {
+  color: #ffd2ca;
+  background: rgba(240, 111, 91, 0.13);
+}
+
+.readiness p,
+.readiness small {
+  margin: 0;
+}
+
+.readiness p {
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.readiness small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
 }
 
 .message-box {
@@ -344,6 +660,30 @@ button {
   color: var(--frost);
   background: rgba(121, 175, 200, 0.12);
   cursor: pointer;
+}
+
+.phone-install {
+  margin: 0 18px 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(121, 175, 200, 0.14);
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(121, 175, 200, 0.035);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.phone-install summary {
+  color: #c8d2da;
+  cursor: pointer;
+  font-weight: 560;
+}
+
+.phone-install ol {
+  display: grid;
+  gap: 7px;
+  margin: 11px 0 0;
+  padding-left: 20px;
 }
 
 .pair-phone {
@@ -410,6 +750,11 @@ button {
 .button--approve {
   border-color: rgba(240, 170, 99, 0.45);
   background: rgba(240, 170, 99, 0.13);
+}
+
+.button--suggestion {
+  border-color: rgba(121, 175, 200, 0.38);
+  background: rgba(121, 175, 200, 0.12);
 }
 
 .interrupt {
@@ -501,7 +846,15 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .suggestion {
+    grid-template-columns: 1fr;
+  }
+
   .approval__actions {
+    justify-content: flex-end;
+  }
+
+  .suggestion__actions {
     justify-content: flex-end;
   }
 
@@ -511,6 +864,16 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .transit-orb__core,
+  .transit-orb__orbit {
+    animation: none;
+  }
+
+  .overlay__content,
+  .transit-orb {
+    transition: none;
+  }
+
   .horizon__signal {
     animation: none;
     transform: none;
@@ -536,5 +899,9 @@ button {
 
   .button--approve:hover {
     background: rgba(240, 170, 99, 0.2);
+  }
+
+  .button--suggestion:hover {
+    background: rgba(121, 175, 200, 0.19);
   }
 }

@@ -7,7 +7,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from jarvis.perception.placement import placement_plan_schema, placement_request_schema
 from jarvis.platform.protocol import client_event_schema, server_event_schema
+from jarvis.runtime.diagnostics import readiness_snapshot_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIRECTORY = ROOT / "ui" / "src" / "generated"
@@ -16,6 +18,9 @@ OUTPUT_DIRECTORY = ROOT / "ui" / "src" / "generated"
 def generate(*, check: bool) -> None:
     schemas = {
         "client-event": ("ClientEvent", client_event_schema()),
+        "overlay-placement-plan": ("OverlayPlacementPlan", placement_plan_schema()),
+        "overlay-placement-request": ("OverlayPlacementRequest", placement_request_schema()),
+        "readiness-snapshot": ("ReadinessSnapshot", readiness_snapshot_schema()),
         "server-event": ("ServerEvent", server_event_schema()),
     }
     expected: dict[Path, str] = {}
@@ -30,9 +35,15 @@ def generate(*, check: bool) -> None:
     expected[OUTPUT_DIRECTORY / "server-event.validator.ts"] = _compile_validator(
         schemas["server-event"][1]
     )
+    expected[OUTPUT_DIRECTORY / "readiness-snapshot.validator.ts"] = _compile_validator(
+        schemas["readiness-snapshot"][1]
+    )
 
     expected[OUTPUT_DIRECTORY / "index.ts"] = (
         'export type { ClientEvent } from "./client-event";\n'
+        'export type { OverlayPlacementPlan } from "./overlay-placement-plan";\n'
+        'export type { OverlayPlacementRequest } from "./overlay-placement-request";\n'
+        'export type { ReadinessSnapshot } from "./readiness-snapshot";\n'
         'export type { ServerEvent } from "./server-event";\n'
     )
 

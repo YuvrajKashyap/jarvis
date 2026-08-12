@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import UniqueConstraint, delete
+from sqlalchemy import UniqueConstraint, delete, func
 from sqlmodel import Field as SqlField
 from sqlmodel import Session, SQLModel, col, select
 
@@ -221,21 +221,16 @@ class MemoryRepository:
             ).all()
             return [_fact_from_row(row) for row in rows]
 
+    def count(self) -> int:
+        with Session(self._sqlite.engine) as session:
+            return int(session.exec(select(func.count()).select_from(MemoryFactRow)).one())
+
     def list_conflicts(self) -> list[MemoryConflict]:
         with Session(self._sqlite.engine) as session:
             rows = session.exec(
                 select(MemoryConflictRow).order_by(MemoryConflictRow.observed_at)
             ).all()
-            return [
-                MemoryConflict(
-                    conflict_id=UUID(row.conflict_id),
-                    fact_id=UUID(row.fact_id),
-                    candidate_content=row.candidate_content,
-                    source_event_ids=_load_source_ids(row.source_event_ids_json),
-                    observed_at=_load_datetime(row.observed_at),
-                )
-                for row in rows
-            ]
+            return [_conflict_from_row(row) for row in rows]
 
     def delete_conflict(self, conflict_id: UUID) -> bool:
         with self._sqlite._write_lock, Session(self._sqlite.engine) as session:
@@ -245,6 +240,97 @@ class MemoryRepository:
             session.delete(row)
             session.commit()
             return True
+
+    def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        accept: bool,
+        resolved_at: datetime,
+    ) -> MemoryFact | None:
+        """Resolve one staged contradiction; acceptance is atomic and provenance-preserving."""
+        _require_aware(resolved_at)
+        with self._sqlite._write_lock, Session(self._sqlite.engine) as session:
+            conflict = session.get(MemoryConflictRow, str(conflict_id))
+            if conflict is None:
+                raise LookupError("memory conflict not found")
+            if not accept:
+                session.delete(conflict)
+                session.commit()
+                return None
+
+            fact = session.get(MemoryFactRow, conflict.fact_id)
+            if fact is None:
+                raise LookupError("memory fact not found")
+            candidate_sources = _load_source_ids(conflict.source_event_ids_json)
+            session.add(
+                MemoryRevisionRow(
+                    revision_id=str(uuid4()),
+                    fact_id=fact.fact_id,
+                    prior_content=fact.content,
+                    prior_version=fact.version,
+                    corrected_at=_dump_datetime(resolved_at),
+                    source_event_id=str(candidate_sources[0]),
+                )
+            )
+            fact.content = conflict.candidate_content
+            fact.source_event_ids_json = _dump_source_ids(
+                _merge_sources(_load_source_ids(fact.source_event_ids_json), candidate_sources)
+            )
+            fact.updated_at = _dump_datetime(resolved_at)
+            fact.version += 1
+            session.add(fact)
+            session.delete(conflict)
+            self._replace_fts(session, fact)
+            session.commit()
+            resolved = _fact_from_row(fact)
+        self._render_markdown()
+        return resolved
+
+    def stage_markdown_edits(
+        self,
+        *,
+        source_event_id: UUID,
+        observed_at: datetime,
+    ) -> tuple[MemoryConflict, ...]:
+        """Validate the editable mirror and stage content changes for explicit review."""
+        _require_aware(observed_at)
+        edits = _parse_markdown_facts(self._markdown_path.read_text(encoding="utf-8"))
+        with self._sqlite._write_lock, Session(self._sqlite.engine) as session:
+            rows = list(session.exec(select(MemoryFactRow)).all())
+            by_id = {UUID(row.fact_id): row for row in rows}
+            if set(edits) != set(by_id):
+                raise ValueError("memory Markdown is missing or contains an unknown fact")
+            staged: list[MemoryConflictRow] = []
+            for fact_id, edit in edits.items():
+                row = by_id[fact_id]
+                category, subject, content, version = edit
+                if version != row.version:
+                    raise ValueError("memory Markdown is stale; refresh it before importing edits")
+                if category != row.category or subject != row.subject:
+                    raise ValueError("memory Markdown headings cannot rename canonical facts")
+                if content == row.content:
+                    continue
+                existing = session.exec(
+                    select(MemoryConflictRow).where(
+                        MemoryConflictRow.fact_id == row.fact_id,
+                        MemoryConflictRow.candidate_content == content,
+                    )
+                ).first()
+                if existing is not None:
+                    staged.append(existing)
+                    continue
+                conflict = MemoryConflictRow(
+                    conflict_id=str(uuid4()),
+                    fact_id=row.fact_id,
+                    candidate_content=content,
+                    source_event_ids_json=_dump_source_ids((source_event_id,)),
+                    observed_at=_dump_datetime(observed_at),
+                )
+                session.add(conflict)
+                staged.append(conflict)
+            session.commit()
+            return tuple(_conflict_from_row(row) for row in staged)
 
     def correct(
         self,
@@ -410,6 +496,63 @@ def _fact_from_row(row: MemoryFactRow) -> MemoryFact:
         updated_at=_load_datetime(row.updated_at),
         version=row.version,
     )
+
+
+def _conflict_from_row(row: MemoryConflictRow) -> MemoryConflict:
+    return MemoryConflict(
+        conflict_id=UUID(row.conflict_id),
+        fact_id=UUID(row.fact_id),
+        candidate_content=row.candidate_content,
+        source_event_ids=_load_source_ids(row.source_event_ids_json),
+        observed_at=_load_datetime(row.observed_at),
+    )
+
+
+def _parse_markdown_facts(document: str) -> dict[UUID, tuple[str, str, str, int]]:
+    facts: dict[UUID, tuple[str, str, str, int]] = {}
+    category: str | None = None
+    subject: str | None = None
+    content_lines: list[str] = []
+    source_seen = False
+    for line in (*document.splitlines(), "## __end__"):
+        if line.startswith("## ") and not line.startswith("### "):
+            if subject is not None:
+                raise ValueError("memory Markdown fact metadata is incomplete")
+            category = line.removeprefix("## ").strip()
+            continue
+        if line.startswith("### "):
+            if category is None or subject is not None:
+                raise ValueError("memory Markdown heading structure is invalid")
+            subject = line.removeprefix("### ").strip()
+            content_lines = []
+            source_seen = False
+            continue
+        if subject is None:
+            continue
+        if line.startswith("Source events: "):
+            source_seen = True
+            continue
+        if line.startswith("Fact ID: "):
+            match = re.fullmatch(r"Fact ID: `([^`]+)` \| Version (\d+)", line)
+            if match is None or not source_seen:
+                raise ValueError("memory Markdown fact metadata is invalid")
+            try:
+                fact_id = UUID(match.group(1))
+            except ValueError as error:
+                raise ValueError("memory Markdown fact ID is invalid") from error
+            if fact_id in facts:
+                raise ValueError("memory Markdown contains a duplicate fact")
+            content = "\n".join(content_lines).strip()
+            if not content or category is None:
+                raise ValueError("memory Markdown fact content cannot be empty")
+            facts[fact_id] = (category, subject, content, int(match.group(2)))
+            subject = None
+            content_lines = []
+            source_seen = False
+            continue
+        if not source_seen:
+            content_lines.append(line)
+    return facts
 
 
 def _merge_sources(existing: tuple[UUID, ...], additional: tuple[UUID, ...]) -> tuple[UUID, ...]:

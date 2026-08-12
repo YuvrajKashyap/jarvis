@@ -32,6 +32,31 @@ _OPERATIONAL_INTENT = re.compile(
     re.IGNORECASE,
 )
 
+_TOOL_INTENTS = (
+    (
+        "context.local_time",
+        re.compile(r"\b(?:what time|current time|time is it|today'?s date|what date)\b", re.I),
+    ),
+    ("context.", re.compile(r"\b(?:screen|desktop|foreground|active window|looking at)\b", re.I)),
+    ("system.", re.compile(r"\b(?:system|ram|cpu|gpu|process|temperature|thermal)\b", re.I)),
+    ("files.", re.compile(r"\b(?:file|folder|document|path|save|rename|copy|delete)\b", re.I)),
+    ("terminal.", re.compile(r"\b(?:terminal|shell|command|build|test|git|pnpm|cargo|uv)\b", re.I)),
+    ("browser.", re.compile(r"\b(?:browser|website|web page|tab|navigate|download|link)\b", re.I)),
+    (
+        "windows.",
+        re.compile(r"\b(?:application|app|button|click|press|fill|select|control)\b", re.I),
+    ),
+    ("memory.", re.compile(r"\b(?:remember|forget|memory|preference)\b", re.I)),
+    (
+        "schedules.",
+        re.compile(r"\b(?:schedule|scheduled|every day|every week|at \d{1,2}(?::\d{2})?)\b", re.I),
+    ),
+    ("notifications.", re.compile(r"\b(?:remind|reminder|notify|notification)\b", re.I)),
+)
+_SAFE_AMBIGUOUS_TOOLS = frozenset(
+    {"context.active_window", "system.health", "browser.inspect", "windows.inspect"}
+)
+
 
 class AssistantSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -129,7 +154,7 @@ class AssistantTurn:
                 ChatMessage(role="user", content=normalized),
                 *continuation,
             ),
-            tools=self._tools if _OPERATIONAL_INTENT.search(normalized) else (),
+            tools=_relevant_tools(normalized, self._tools),
             context_length=self._settings.context_length,
             reasoning=self._settings.reasoning,
         )
@@ -142,3 +167,14 @@ class AssistantTurn:
                 yield ToolProposal(call=chunk.tool_call)
             elif chunk.kind is ModelChunkKind.DONE:
                 yield TurnComplete(tokens_per_second=chunk.tokens_per_second)
+
+
+def _relevant_tools(user_text: str, tools: tuple[ToolSchema, ...]) -> tuple[ToolSchema, ...]:
+    prefixes = tuple(prefix for prefix, pattern in _TOOL_INTENTS if pattern.search(user_text))
+    if prefixes:
+        selected = tuple(tool for tool in tools if tool.name.startswith(prefixes))
+        if selected:
+            return selected
+    if not _OPERATIONAL_INTENT.search(user_text):
+        return ()
+    return tuple(tool for tool in tools if tool.name in _SAFE_AMBIGUOUS_TOOLS)
