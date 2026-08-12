@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlmodel import Field as SqlField
-from sqlmodel import Session, SQLModel
+from sqlmodel import Session, SQLModel, func, select
 
 from jarvis.platform.pairing import (
     PairedDevice,
@@ -98,6 +98,10 @@ class SQLitePairingStore:
                 public_key_jwk=json.loads(row.public_key_jwk_json),
                 paired_at=_load_datetime(row.paired_at),
             )
+
+    def paired_device_count(self) -> int:
+        with Session(self._store.engine) as session:
+            return int(session.exec(select(func.count()).select_from(PairedDeviceRow)).one())
 
     def put_challenge(self, challenge: StoredChallenge) -> None:
         with self._store._write_lock, Session(self._store.engine) as session:

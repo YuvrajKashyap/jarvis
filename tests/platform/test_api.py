@@ -21,15 +21,23 @@ from jarvis.agency.capabilities import (
     ExecutionStatus,
 )
 from jarvis.agency.policy import ApprovalChoice, RiskClass
+from jarvis.agency.proactivity import (
+    ProactivePriority,
+    ProactiveSuggestion,
+    ProactivityFeedback,
+    TopicPreference,
+)
 from jarvis.agency.scheduler import ScheduledExecutionEvent
 from jarvis.memory.history import ConversationHistoryRepository, ConversationRole
 from jarvis.memory.store import MemoryCandidate, MemoryRepository
+from jarvis.perception.placement import PlacementPlan, PlacementRequest, Rect
 from jarvis.platform.api import ApiSettings, _scheduled_capability_result_event, create_app
 from jarvis.platform.models import ChatMessage, ToolCall
 from jarvis.platform.pairing import InMemoryPairingStore, PhonePairing, public_key_to_jwk
 from jarvis.platform.sqlite import SQLiteStore
 from jarvis.runtime.assistant import TextDelta, ToolProposal, TurnComplete
 from jarvis.runtime.conversation import ListeningMode, RuntimeCoordinator
+from jarvis.runtime.diagnostics import DiagnosticCheck, DiagnosticState, ReadinessSnapshot
 from jarvis.runtime.resources import ResourcePressure
 from jarvis.speech.desktop import (
     DesktopAmbientTranscript,
@@ -324,6 +332,26 @@ class FakeScheduledEvents:
         self.resolved.append(approval_id)
 
 
+class FakeProactiveEvents:
+    def __init__(self, suggestion: ProactiveSuggestion) -> None:
+        self._events: asyncio.Queue[ProactiveSuggestion] = asyncio.Queue()
+        self._events.put_nowait(suggestion)
+
+    async def subscribe(self):
+        while True:
+            yield await self._events.get()
+
+    def apply_feedback(
+        self,
+        suggestion_id: UUID,
+        *,
+        feedback: ProactivityFeedback,
+        now: datetime,
+    ) -> TopicPreference:
+        assert suggestion_id == UUID("019fd977-1d96-7892-950c-6afbb71f7cfd")
+        return TopicPreference(topic="focus.checkpoint", affinity=-1)
+
+
 class FakeSpeechSession:
     def __init__(self) -> None:
         self.text: list[str] = []
@@ -349,6 +377,34 @@ class FakeSpeechOutput:
         session = FakeSpeechSession()
         self.sessions.append(session)
         return session
+
+
+class FakeOverlayPlacement:
+    def plan(self, request: PlacementRequest) -> PlacementPlan:
+        assert request.intent.value == "conversation"
+        return PlacementPlan(
+            disposition="place",
+            target=Rect(left=24, top=24, width=760, height=224),
+            monitor_name="primary",
+            anchor="top_left",
+            reason="clear_region_on_attention_monitor",
+            density=0.08,
+        )
+
+
+class FakeDiagnostics:
+    async def snapshot(self) -> ReadinessSnapshot:
+        return ReadinessSnapshot(
+            overall=DiagnosticState.UNVERIFIED,
+            generated_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
+            checks=(
+                DiagnosticCheck(
+                    code="model_quality",
+                    state=DiagnosticState.UNVERIFIED,
+                    summary="Model quality acceptance has not passed.",
+                ),
+            ),
+        )
 
 
 @pytest.fixture
@@ -379,6 +435,43 @@ def test_health_is_minimal_public_and_has_security_headers(client: TestClient) -
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert TOKEN not in response.text
+
+
+def test_authenticated_diagnostics_expose_unverified_subsystems_without_public_leakage(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+        diagnostics=FakeDiagnostics(),
+    )
+    with TestClient(app) as diagnostic_client:
+        unauthorized = diagnostic_client.get("/v1/diagnostics")
+        response = diagnostic_client.get(
+            "/v1/diagnostics",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == 200
+    assert response.json() == {
+        "overall": "unverified",
+        "generated_at": "2026-08-11T12:00:00Z",
+        "checks": [
+            {
+                "code": "model_quality",
+                "state": "unverified",
+                "summary": "Model quality acceptance has not passed.",
+                "detail": None,
+            }
+        ],
+    }
 
 
 def test_desktop_origin_can_preflight_authenticated_http_requests(client: TestClient) -> None:
@@ -416,6 +509,47 @@ def test_runtime_state_defaults_to_deny_without_valid_bearer(client: TestClient)
     assert wrong.status_code == 401
     assert valid.status_code == 200
     assert valid.json()["phase"] == "idle"
+
+
+def test_overlay_placement_is_desktop_authenticated_and_typed(tmp_path: Path) -> None:
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+        overlay_placement=FakeOverlayPlacement(),
+    )
+    payload = {
+        "intent": "conversation",
+        "overlay": {"left": 580, "top": 776, "width": 760, "height": 224, "visible": True},
+        "pointer": {"x": 960, "y": 440},
+        "monitors": [
+            {
+                "name": "primary",
+                "bounds": {"left": 0, "top": 0, "width": 1920, "height": 1080},
+                "work_area": {"left": 0, "top": 0, "width": 1920, "height": 1032},
+            }
+        ],
+    }
+    with TestClient(app) as placement_client:
+        regular = placement_client.post(
+            "/v1/overlay/placement",
+            headers={"authorization": f"Bearer {TOKEN}"},
+            json=payload,
+        )
+        desktop = placement_client.post(
+            "/v1/overlay/placement",
+            headers={"authorization": f"Bearer {DESKTOP_TOKEN}"},
+            json=payload,
+        )
+
+    assert regular.status_code == 401
+    assert desktop.status_code == 200
+    assert desktop.json()["target"]["left"] == 24
 
 
 def test_ephemeral_desktop_token_authenticates_http_and_browser_websocket(
@@ -924,6 +1058,100 @@ def test_memory_can_be_inspected_corrected_and_forgotten_through_authenticated_a
     assert after.json() == {"facts": []}
 
 
+def test_memory_conflict_requires_an_explicit_authenticated_resolution(tmp_path: Path) -> None:
+    database = SQLiteStore(tmp_path / "jarvis.db")
+    database.initialize()
+    memory = MemoryRepository(sqlite=database, markdown_directory=tmp_path / "Memory")
+    memory.initialize()
+    memory.remember(
+        MemoryCandidate(
+            category="hardware",
+            subject="phone",
+            content="Yuvraj uses an iPhone 16 Pro.",
+            source_event_ids=(UUID(SESSION_ID),),
+            observed_at=datetime(2026, 8, 7, 18, 30, tzinfo=UTC),
+        )
+    )
+    conflict = memory.remember(
+        MemoryCandidate(
+            category="hardware",
+            subject="phone",
+            content="Yuvraj uses an iPhone 17 Pro.",
+            source_event_ids=(UUID("019fd977-1d96-7892-950c-6afbb71f7cf1"),),
+            observed_at=datetime(2026, 8, 8, 18, 30, tzinfo=UTC),
+        )
+    )
+    assert conflict.conflict_id is not None
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        memory=memory,
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+    authorization = {"authorization": f"Bearer {DESKTOP_TOKEN}"}
+    with TestClient(app) as client:
+        unauthorized = client.post(
+            f"/v1/memory/conflicts/{conflict.conflict_id}/resolve", json={"accept": True}
+        )
+        accepted = client.post(
+            f"/v1/memory/conflicts/{conflict.conflict_id}/resolve",
+            headers=authorization,
+            json={"accept": True},
+        )
+        conflicts = client.get("/v1/memory/conflicts", headers=authorization)
+
+    assert unauthorized.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json()["accepted"] is True
+    assert accepted.json()["fact"]["content"] == "Yuvraj uses an iPhone 17 Pro."
+    assert conflicts.json() == {"conflicts": []}
+
+
+def test_memory_markdown_edits_are_staged_through_authenticated_admin(tmp_path: Path) -> None:
+    database = SQLiteStore(tmp_path / "jarvis.db")
+    database.initialize()
+    memory = MemoryRepository(sqlite=database, markdown_directory=tmp_path / "Memory")
+    memory.initialize()
+    memory.remember(
+        MemoryCandidate(
+            category="hardware",
+            subject="phone",
+            content="Yuvraj uses an iPhone 16 Pro.",
+            source_event_ids=(UUID(SESSION_ID),),
+            observed_at=datetime(2026, 8, 7, 18, 30, tzinfo=UTC),
+        )
+    )
+    path = tmp_path / "Memory" / "memory.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("iPhone 16 Pro", "iPhone 17 Pro"),
+        encoding="utf-8",
+    )
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        memory=memory,
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/memory/import-markdown",
+            headers={"authorization": f"Bearer {DESKTOP_TOKEN}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["conflicts"][0]["candidate_content"].endswith("iPhone 17 Pro.")
+
+
 def test_binary_phone_pcm_enters_the_same_transcribed_turn_pipeline() -> None:
     speech = FakeSpeechInput()
     app = create_app(
@@ -1059,7 +1287,9 @@ def test_observation_result_returns_to_the_model_for_a_grounded_answer() -> None
         "state_changed",
     ]
     assert assistant.continuations[0] == ()
-    tool_context = assistant.continuations[1][0]
+    tool_call_context, tool_context = assistant.continuations[1]
+    assert tool_call_context.role == "assistant"
+    assert tool_call_context.tool_calls[0].name == "context.active_window"
     assert tool_context.role == "tool"
     assert '"title":"JARVIS"' in tool_context.content
 
@@ -1125,6 +1355,62 @@ def test_scheduled_external_action_is_pushed_and_approved_from_live_desktop() ->
     assert result["type"] == "capability_result"
     assert result["payload"]["status"] == "succeeded"
     assert scheduled_events.resolved == [APPROVAL_ID]
+
+
+def test_proactive_suggestion_is_pushed_as_observe_only_context() -> None:
+    now = datetime.now(UTC)
+    proactive_events = FakeProactiveEvents(
+        ProactiveSuggestion(
+            suggestion_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cfd"),
+            fingerprint="focus:code:checkpoint",
+            topic="focus.checkpoint",
+            title="You have been deep in this for a while",
+            message="I can help you checkpoint the work before the context gets expensive.",
+            reason="The same application has stayed in the foreground for 71 minutes.",
+            suggested_prompt="Help me checkpoint what I am working on.",
+            priority=ProactivePriority.QUIET,
+            observed_at=now,
+            expires_at=now + timedelta(minutes=20),
+        )
+    )
+    app = create_app(
+        runtime=RuntimeCoordinator(),
+        settings=ApiSettings(
+            bearer_token=TOKEN,
+            desktop_session_token=DESKTOP_TOKEN,
+            allowed_hosts=("testserver",),
+            allowed_origins=("http://127.0.0.1:1420",),
+        ),
+        phone_pairing=PhonePairing(InMemoryPairingStore()),
+        proactive_events=proactive_events,
+    )
+
+    with TestClient(app).websocket_connect(
+        "/v1/live",
+        headers={"origin": "http://127.0.0.1:1420"},
+        subprotocols=["jarvis.v1", f"jarvis.desktop.{DESKTOP_TOKEN}"],
+    ) as socket:
+        assert socket.receive_json()["type"] == "state_changed"
+        suggestion = socket.receive_json()
+
+    assert suggestion["type"] == "proactive_suggestion"
+    assert suggestion["payload"]["priority"] == "quiet"
+    assert suggestion["payload"]["proposed_action"] is None
+    assert "foreground" in suggestion["payload"]["reason"]
+
+    with TestClient(app) as client:
+        feedback = client.post(
+            "/v1/proactivity/019fd977-1d96-7892-950c-6afbb71f7cfd/feedback",
+            headers={"authorization": f"Bearer {DESKTOP_TOKEN}"},
+            json={"feedback": "less"},
+        )
+    assert feedback.status_code == 200
+    assert feedback.json() == {
+        "topic": "focus.checkpoint",
+        "muted": False,
+        "snoozed_until": None,
+        "affinity": -1,
+    }
 
 
 def test_unknown_approval_never_enters_acting_state() -> None:

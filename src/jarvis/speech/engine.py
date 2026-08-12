@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
@@ -83,9 +84,14 @@ class SpeechCoordinator:
         self._ambient_utterance = False
         self._speech_started = False
         self._silence_ms = 0
+        self._lock = threading.RLock()
         self.phase = SpeechPhase.IDLE
 
     def ingest(self, pcm: bytes) -> SpeechEvent | None:
+        with self._lock:
+            return self._ingest(pcm)
+
+    def _ingest(self, pcm: bytes) -> SpeechEvent | None:
         self._buffer.append(pcm)
         if self.phase is SpeechPhase.PLAYING and self._vad.is_speech(pcm):
             self._playback.cancel()
@@ -136,22 +142,26 @@ class SpeechCoordinator:
         self.set_mode(AwarenessMode.PRIVATE if enabled else AwarenessMode.NORMAL)
 
     def set_mode(self, mode: AwarenessMode) -> None:
-        self._mode = mode
-        self._buffer.set_private(mode is AwarenessMode.PRIVATE)
-        self._reset_utterance()
-        self.phase = self._resting_phase()
+        with self._lock:
+            self._mode = mode
+            self._buffer.set_private(mode is AwarenessMode.PRIVATE)
+            self._reset_utterance()
+            self.phase = self._resting_phase()
 
     def complete_transcription(self) -> None:
-        if self.phase is not SpeechPhase.TRANSCRIBING:
-            raise RuntimeError("speech engine is not transcribing")
-        self.phase = self._resting_phase()
+        with self._lock:
+            if self.phase is not SpeechPhase.TRANSCRIBING:
+                raise RuntimeError("speech engine is not transcribing")
+            self.phase = self._resting_phase()
 
     def begin_playback(self) -> None:
-        self.phase = SpeechPhase.PLAYING
+        with self._lock:
+            self.phase = SpeechPhase.PLAYING
 
     def finish_playback(self) -> None:
-        if self.phase is SpeechPhase.PLAYING:
-            self.phase = self._resting_phase()
+        with self._lock:
+            if self.phase is SpeechPhase.PLAYING:
+                self.phase = self._resting_phase()
 
     def _append_utterance(self, pcm: bytes) -> None:
         maximum_bytes = (

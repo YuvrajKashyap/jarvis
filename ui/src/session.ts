@@ -13,6 +13,7 @@ export function initialView(): SessionView {
     state: "idle",
     transcript: [],
     approval: null,
+    suggestion: null,
     detail: null,
     lastSequence: -1,
     lastSessionId: null,
@@ -79,6 +80,18 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
         detail: event.payload.message,
         detailIsPersistent: true,
       };
+    case "proactive_suggestion":
+      return {
+        ...next,
+        suggestion: {
+          id: event.payload.suggestion_id,
+          title: event.payload.title,
+          message: event.payload.message,
+          reason: event.payload.reason,
+          suggestedPrompt: event.payload.suggested_prompt,
+          priority: event.payload.priority,
+        },
+      };
     case "error":
       return {
         ...next,
@@ -90,14 +103,25 @@ export function reduceServerEvent(view: SessionView, event: ServerEvent): Sessio
 
 export function shouldRevealDesktopOverlay(event: ServerEvent): boolean {
   if (event.type === "state_changed") return event.payload.state !== "idle";
-  return event.type === "capability_result" || event.type === "approval_required";
+  return (
+    event.type === "capability_result" ||
+    event.type === "approval_required" ||
+    event.type === "proactive_suggestion"
+  );
 }
 
-export function shouldRepositionDesktopOverlay(event: ServerEvent): boolean {
+export type DesktopOverlayMovementIntent = "conversation" | "proactive";
+
+export function desktopOverlayMovementIntent(
+  event: ServerEvent,
+): DesktopOverlayMovementIntent | null {
   if (event.type === "state_changed") {
-    return ["listening", "private", "meeting", "lecture", "ambient"].includes(event.payload.state);
+    return ["listening", "private", "meeting", "lecture", "ambient"].includes(event.payload.state)
+      ? "conversation"
+      : null;
   }
-  return event.type === "approval_required" || isReminderNotification(event);
+  if (event.type === "proactive_suggestion") return "proactive";
+  return isReminderNotification(event) ? "proactive" : null;
 }
 
 export function isReminderNotification(

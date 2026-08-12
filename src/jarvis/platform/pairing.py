@@ -89,6 +89,8 @@ class PairingStore(Protocol):
 
     def get_device(self, device_id: str) -> PairedDevice | None: ...
 
+    def paired_device_count(self) -> int: ...
+
     def put_challenge(self, challenge: StoredChallenge) -> None: ...
 
     def get_challenge(self, challenge_id: UUID) -> StoredChallenge | None: ...
@@ -132,6 +134,10 @@ class InMemoryPairingStore:
         with self._lock:
             return self._devices.get(device_id)
 
+    def paired_device_count(self) -> int:
+        with self._lock:
+            return len(self._devices)
+
     def put_challenge(self, challenge: StoredChallenge) -> None:
         with self._lock:
             self._challenges[challenge.challenge_id] = challenge
@@ -160,6 +166,9 @@ class InMemoryPairingStore:
 class PhonePairing:
     def __init__(self, store: PairingStore) -> None:
         self._store = store
+
+    def paired_device_count(self) -> int:
+        return self._store.paired_device_count()
 
     def create_offer(self, *, now: datetime) -> PairingOffer:
         _require_aware(now)

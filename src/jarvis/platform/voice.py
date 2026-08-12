@@ -87,7 +87,8 @@ class ChatterboxTurboSynthesizer:
         *,
         reference_path: Path,
         device: str = "cuda",
-        loader: Callable[[str], ChatterboxModel] | None = None,
+        nano: bool = False,
+        loader: Callable[[str, bool], ChatterboxModel] | None = None,
     ) -> None:
         reference = reference_path.resolve()
         if not reference.is_file():
@@ -96,6 +97,7 @@ class ChatterboxTurboSynthesizer:
             raise ValueError("Chatterbox device must be cpu or cuda")
         self._reference_path = reference
         self._device = device
+        self._nano = nano
         self._loader = loader or _load_chatterbox
         self._model: ChatterboxModel | None = None
         self._lock = threading.Lock()
@@ -112,7 +114,7 @@ class ChatterboxTurboSynthesizer:
         with self._lock:
             model = self._model
             if model is None:
-                model = self._loader(self._device)
+                model = self._loader(self._device, self._nano)
                 model.prepare_conditionals(str(self._reference_path))
                 self._model = model
             waveform = _as_float_waveform(model.generate(text))
@@ -122,10 +124,10 @@ class ChatterboxTurboSynthesizer:
             return SynthesizedAudio(sample_rate=int(model.sr), pcm_s16le=pcm)
 
 
-def _load_chatterbox(device: str) -> ChatterboxModel:
+def _load_chatterbox(device: str, nano: bool) -> ChatterboxModel:
     chatterbox = import_module("chatterbox.tts_turbo")
     model_type = chatterbox.ChatterboxTurboTTS
-    return cast(ChatterboxModel, model_type.from_pretrained(device=device))
+    return cast(ChatterboxModel, model_type.from_pretrained(device=device, nano=nano))
 
 
 def _as_float_waveform(value: object) -> NDArray[np.float32]:

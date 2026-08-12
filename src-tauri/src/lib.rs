@@ -1,18 +1,22 @@
 //! Thin Windows host for JARVIS. Product behavior lives in the Python core.
 
 mod host;
+mod placement;
 mod supervisor;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use host::CoreSupervisor;
+use placement::{
+    OverlayAnchor, OverlayGeometry, OverlayMotion, OverlayScreen, PlacementIntent, ScreenRect,
+    anchored_resize_geometry, geometry_is_inside_any_screen, geometry_is_inside_screen,
+    monitor_index_at, overlay_geometry_at_anchor, place_overlay_for_attention, rounded_i32,
+    rounded_u32, select_attention_anchor,
+};
+use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{
-    Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, Position, RunEvent, WindowEvent,
-};
+use tauri::{Emitter, Manager, Monitor, PhysicalPosition, Position, RunEvent, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_notification::NotificationExt;
@@ -28,44 +32,42 @@ struct OverlayPlacement {
     manually_positioned: AtomicBool,
 }
 
-#[derive(Debug, Clone)]
-struct OverlayMotion {
-    revision: Arc<AtomicU64>,
-    target_screen: Arc<Mutex<Option<OverlayScreen>>>,
+#[derive(Debug, Serialize)]
+struct PlacementPoint {
+    x: f64,
+    y: f64,
 }
 
-impl Default for OverlayMotion {
-    fn default() -> Self {
-        Self {
-            revision: Arc::new(AtomicU64::new(0)),
-            target_screen: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OverlayScreen {
-    rect: ScreenRect,
-    bottom_margin: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OverlayGeometry {
-    x: i32,
-    y: i32,
+#[derive(Debug, Serialize)]
+struct PlacementRect {
+    left: i32,
+    top: i32,
     width: u32,
     height: u32,
 }
 
-impl OverlayGeometry {
-    const fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
+#[derive(Debug, Serialize)]
+struct PlacementMonitor {
+    name: String,
+    bounds: PlacementRect,
+    work_area: PlacementRect,
+}
+
+#[derive(Debug, Serialize)]
+struct PlacementOverlay {
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+    visible: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct PlacementContext {
+    overlay: PlacementOverlay,
+    pointer: PlacementPoint,
+    monitors: Vec<PlacementMonitor>,
+    auto_position: bool,
 }
 
 impl OverlayPlacement {
@@ -80,179 +82,6 @@ impl OverlayPlacement {
     fn should_auto_position(&self) -> bool {
         !self.manually_positioned.load(Ordering::Acquire)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ScreenRect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-}
-
-impl ScreenRect {
-    fn new(left: i32, top: i32, width: u32, height: u32) -> Self {
-        let width = i32::try_from(width).unwrap_or(i32::MAX);
-        let height = i32::try_from(height).unwrap_or(i32::MAX);
-        Self {
-            left,
-            top,
-            right: left.saturating_add(width),
-            bottom: top.saturating_add(height),
-        }
-    }
-
-    fn contains(self, point: (f64, f64)) -> bool {
-        point.0 >= f64::from(self.left)
-            && point.0 < f64::from(self.right)
-            && point.1 >= f64::from(self.top)
-            && point.1 < f64::from(self.bottom)
-    }
-}
-
-fn monitor_index_at(point: (f64, f64), monitors: &[ScreenRect]) -> Option<usize> {
-    monitors.iter().position(|monitor| monitor.contains(point))
-}
-
-fn interpolate_geometry(
-    start: OverlayGeometry,
-    target: OverlayGeometry,
-    progress: f64,
-) -> OverlayGeometry {
-    let progress = progress.clamp(0.0, 1.0);
-    let eased = 1.0 - (1.0 - progress).powi(5);
-    let interpolate_position = |from: i32, to: i32| {
-        rounded_i32(f64::from(from) + f64::from(to.saturating_sub(from)) * eased)
-    };
-    let interpolate_extent = |from: u32, to: u32| {
-        rounded_u32(f64::from(from) + (f64::from(to) - f64::from(from)) * eased)
-    };
-    OverlayGeometry::new(
-        interpolate_position(start.x, target.x),
-        interpolate_position(start.y, target.y),
-        interpolate_extent(start.width, target.width),
-        interpolate_extent(start.height, target.height),
-    )
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn rounded_i32(value: f64) -> i32 {
-    value
-        .clamp(f64::from(i32::MIN), f64::from(i32::MAX))
-        .round() as i32
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn rounded_u32(value: f64) -> u32 {
-    value.clamp(0.0, f64::from(u32::MAX)).round() as u32
-}
-
-fn anchored_resize_geometry(
-    current: OverlayGeometry,
-    target_height: u32,
-    screen: ScreenRect,
-    bottom_margin: i32,
-) -> OverlayGeometry {
-    let available_height = u32::try_from(
-        screen
-            .bottom
-            .saturating_sub(screen.top)
-            .saturating_sub(bottom_margin),
-    )
-    .unwrap_or(0);
-    let height = target_height.min(available_height);
-    let width = current
-        .width
-        .min(u32::try_from(screen.right.saturating_sub(screen.left)).unwrap_or(0));
-    let width_i32 = i32::try_from(width).unwrap_or(i32::MAX);
-    let height_i32 = i32::try_from(height).unwrap_or(i32::MAX);
-    let max_x = screen.right.saturating_sub(width_i32);
-    let usable_bottom = screen.bottom.saturating_sub(bottom_margin);
-    let current_bottom = current
-        .y
-        .saturating_add(i32::try_from(current.height).unwrap_or(i32::MAX));
-    let anchored_bottom = current_bottom.clamp(screen.top, usable_bottom);
-    let max_y = usable_bottom.saturating_sub(height_i32);
-    OverlayGeometry::new(
-        current.x.clamp(screen.left, max_x),
-        anchored_bottom
-            .saturating_sub(height_i32)
-            .clamp(screen.top, max_y),
-        width,
-        height,
-    )
-}
-
-impl OverlayMotion {
-    fn remember_screen(&self, screen: OverlayScreen) {
-        *self
-            .target_screen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(screen);
-    }
-
-    fn target_screen(&self) -> Option<OverlayScreen> {
-        *self
-            .target_screen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn clear_screen(&self) {
-        *self
-            .target_screen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-    }
-
-    fn retarget(
-        &self,
-        window: tauri::WebviewWindow,
-        target: OverlayGeometry,
-        animate: bool,
-    ) -> Result<(), String> {
-        let size = window.outer_size().map_err(|error| error.to_string())?;
-        let position = window.outer_position().map_err(|error| error.to_string())?;
-        let start = OverlayGeometry::new(position.x, position.y, size.width, size.height);
-        let revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
-        if !animate || start == target {
-            apply_overlay_geometry(&window, target)?;
-            return Ok(());
-        }
-
-        let latest_revision = Arc::clone(&self.revision);
-        std::thread::spawn(move || {
-            const FRAMES: u32 = 14;
-            for frame in 1..=FRAMES {
-                if latest_revision.load(Ordering::Acquire) != revision {
-                    return;
-                }
-                let geometry =
-                    interpolate_geometry(start, target, f64::from(frame) / f64::from(FRAMES));
-                if apply_overlay_geometry(&window, geometry).is_err() {
-                    return;
-                }
-                if frame < FRAMES {
-                    std::thread::sleep(Duration::from_millis(16));
-                }
-            }
-        });
-        Ok(())
-    }
-}
-
-fn apply_overlay_geometry(
-    window: &tauri::WebviewWindow,
-    geometry: OverlayGeometry,
-) -> Result<(), String> {
-    window
-        .set_size(PhysicalSize::new(geometry.width, geometry.height))
-        .map_err(|error| error.to_string())?;
-    window
-        .set_position(Position::Physical(PhysicalPosition::new(
-            geometry.x, geometry.y,
-        )))
-        .map_err(|error| error.to_string())
 }
 
 impl DesktopSession {
@@ -274,7 +103,7 @@ fn desktop_session_token(session: tauri::State<'_, DesktopSession>) -> String {
 }
 
 fn clamp_overlay_height(content_height: f64) -> f64 {
-    content_height.ceil().clamp(224.0, 520.0)
+    content_height.ceil().clamp(224.0, 760.0)
 }
 
 #[tauri::command]
@@ -297,13 +126,24 @@ fn fit_overlay(
         let destination = motion.target_screen().unwrap_or(OverlayScreen {
             rect: screen,
             bottom_margin: physical_bottom_margin(&monitor),
+            anchor: OverlayAnchor::BottomCenter,
         });
-        centered_overlay_geometry(
-            destination.rect,
-            current.width,
-            target_height,
-            destination.bottom_margin,
-        )
+        if destination.anchor == OverlayAnchor::Preserve {
+            anchored_resize_geometry(
+                current,
+                target_height,
+                destination.rect,
+                destination.bottom_margin,
+            )
+        } else {
+            overlay_geometry_at_anchor(
+                destination.rect,
+                current.width,
+                target_height,
+                destination.bottom_margin,
+                destination.anchor,
+            )
+        }
     } else {
         anchored_resize_geometry(
             current,
@@ -337,6 +177,133 @@ fn reset_overlay_position(
 ) -> Result<(), String> {
     placement.reset();
     move_overlay_to_cursor(window, &motion, animate)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn move_overlay_for_attention(
+    window: tauri::WebviewWindow,
+    placement: tauri::State<'_, OverlayPlacement>,
+    motion: tauri::State<'_, OverlayMotion>,
+    intent: String,
+    animate: bool,
+) -> Result<(), String> {
+    let intent = PlacementIntent::parse(&intent)?;
+    if !placement.should_auto_position() {
+        return Ok(());
+    }
+    move_overlay_to_attention(window, &motion, intent, animate)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn overlay_placement_context(
+    window: tauri::WebviewWindow,
+    placement: tauri::State<'_, OverlayPlacement>,
+) -> Result<PlacementContext, String> {
+    let current = current_overlay_geometry(&window)?;
+    let visible = window.is_visible().map_err(|error| error.to_string())?;
+    let pointer = window
+        .cursor_position()
+        .map_err(|error| error.to_string())?;
+    let monitors = window
+        .available_monitors()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .enumerate()
+        .map(|(index, monitor)| {
+            let rect = screen_rect(&monitor);
+            let bottom_margin = physical_bottom_margin(&monitor);
+            PlacementMonitor {
+                name: monitor
+                    .name()
+                    .map_or_else(|| format!("display-{}", index + 1), ToOwned::to_owned),
+                bounds: placement_rect(rect),
+                work_area: placement_rect(ScreenRect {
+                    bottom: rect.bottom.saturating_sub(bottom_margin),
+                    ..rect
+                }),
+            }
+        })
+        .collect();
+    Ok(PlacementContext {
+        overlay: PlacementOverlay {
+            left: current.x,
+            top: current.y,
+            width: current.width,
+            height: current.height,
+            visible,
+        },
+        pointer: PlacementPoint {
+            x: pointer.x,
+            y: pointer.y,
+        },
+        monitors,
+        auto_position: placement.should_auto_position(),
+    })
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
+fn apply_content_aware_placement(
+    window: tauri::WebviewWindow,
+    placement: tauri::State<'_, OverlayPlacement>,
+    motion: tauri::State<'_, OverlayMotion>,
+    intent: String,
+    disposition: String,
+    target_left: i32,
+    target_top: i32,
+    target_width: u32,
+    target_height: u32,
+    animate: bool,
+) -> Result<bool, String> {
+    let intent = PlacementIntent::parse(&intent)?;
+    if !placement.should_auto_position() {
+        return Ok(true);
+    }
+    if disposition == "defer" {
+        if intent != PlacementIntent::Proactive {
+            return Err("an active conversation cannot be deferred".to_owned());
+        }
+        window.hide().map_err(|error| error.to_string())?;
+        return Ok(false);
+    }
+    if disposition != "place" {
+        return Err("overlay placement disposition is not supported".to_owned());
+    }
+    if target_width < 320 || target_height < 160 {
+        return Err("content-aware target is too small for the conversation surface".to_owned());
+    }
+    let target = OverlayGeometry::new(target_left, target_top, target_width, target_height);
+    let monitors = window
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let screens = monitors.iter().map(screen_rect).collect::<Vec<_>>();
+    if !geometry_is_inside_any_screen(target, &screens) {
+        return Err("content-aware target must fit on one display".to_owned());
+    }
+    let center = (
+        f64::from(target.x) + f64::from(target.width) / 2.0,
+        f64::from(target.y) + f64::from(target.height) / 2.0,
+    );
+    let monitor_index = monitor_index_at(center, &screens)
+        .ok_or_else(|| "content-aware target display is unavailable".to_owned())?;
+    motion.remember_screen(OverlayScreen {
+        rect: screens[monitor_index],
+        bottom_margin: physical_bottom_margin(&monitors[monitor_index]),
+        anchor: OverlayAnchor::Preserve,
+    });
+    motion.relocate(window, target, animate)?;
+    Ok(true)
+}
+
+fn placement_rect(rect: ScreenRect) -> PlacementRect {
+    PlacementRect {
+        left: rect.left,
+        top: rect.top,
+        width: u32::try_from(rect.right.saturating_sub(rect.left)).unwrap_or(0),
+        height: u32::try_from(rect.bottom.saturating_sub(rect.top)).unwrap_or(0),
+    }
 }
 
 fn validate_notification_message(message: &str) -> Result<&str, &'static str> {
@@ -377,9 +344,12 @@ pub fn run() {
         .build();
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            apply_content_aware_placement,
             begin_overlay_drag,
             desktop_session_token,
             fit_overlay,
+            move_overlay_for_attention,
+            overlay_placement_context,
             reset_overlay_position,
             show_reminder_notification
         ])
@@ -467,9 +437,6 @@ pub fn run() {
 
 fn show_overlay(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("overlay") {
-        if app.state::<OverlayPlacement>().should_auto_position() {
-            position_overlay(&window)?;
-        }
         window.show()?;
         window.set_focus()?;
     }
@@ -503,8 +470,52 @@ fn move_overlay_to_cursor(
     motion.remember_screen(OverlayScreen {
         rect: screen,
         bottom_margin: physical_bottom_margin(&monitor),
+        anchor: OverlayAnchor::BottomCenter,
     });
-    motion.retarget(window, target, animate)
+    motion.relocate(window, target, animate)
+}
+
+fn move_overlay_to_attention(
+    window: tauri::WebviewWindow,
+    motion: &OverlayMotion,
+    intent: PlacementIntent,
+    animate: bool,
+) -> Result<(), String> {
+    let current = current_overlay_geometry(&window)?;
+    let overlay_visible = window.is_visible().map_err(|error| error.to_string())?;
+    let (monitor, screen) = if intent == PlacementIntent::Conversation || !overlay_visible {
+        monitor_for_cursor(&window)?
+    } else {
+        monitor_for_overlay(&window, current)?
+    };
+    let cursor = window
+        .cursor_position()
+        .map_err(|error| error.to_string())?;
+    let bottom_margin = physical_bottom_margin(&monitor);
+    let attention = (cursor.x, cursor.y);
+    let visible_on_target = overlay_visible && geometry_is_inside_screen(current, screen);
+    let anchor = select_attention_anchor(
+        screen,
+        current,
+        attention,
+        bottom_margin,
+        intent,
+        visible_on_target,
+    );
+    let target = place_overlay_for_attention(
+        screen,
+        current,
+        attention,
+        bottom_margin,
+        intent,
+        visible_on_target,
+    );
+    motion.remember_screen(OverlayScreen {
+        rect: screen,
+        bottom_margin,
+        anchor,
+    });
+    motion.relocate(window, target, animate)
 }
 
 fn screen_rect(monitor: &Monitor) -> ScreenRect {
@@ -626,9 +637,7 @@ fn position_overlay_on_monitor(
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopSession, OverlayGeometry, OverlayMotion, OverlayPlacement, OverlayScreen,
-        ScreenRect, anchored_resize_geometry, clamp_overlay_height, interpolate_geometry,
-        monitor_index_at, validate_notification_message,
+        DesktopSession, OverlayPlacement, clamp_overlay_height, validate_notification_message,
     };
 
     #[test]
@@ -657,23 +666,10 @@ mod tests {
     }
 
     #[test]
-    fn overlay_follows_the_monitor_containing_the_cursor() {
-        let monitors = [
-            ScreenRect::new(0, 0, 3_840, 2_160),
-            ScreenRect::new(-3_840, 0, 1_920, 2_160),
-            ScreenRect::new(-6_400, 1_007, 2_560, 1_440),
-        ];
-
-        assert_eq!(monitor_index_at((-3_200.0, 900.0), &monitors), Some(1));
-        assert_eq!(monitor_index_at((-5_900.0, 1_200.0), &monitors), Some(2));
-        assert_eq!(monitor_index_at((4_100.0, 900.0), &monitors), None);
-    }
-
-    #[test]
     fn overlay_expands_for_content_without_taking_over_the_screen() {
         assert!((clamp_overlay_height(90.0) - 224.0).abs() < f64::EPSILON);
         assert!((clamp_overlay_height(336.25) - 337.0).abs() < f64::EPSILON);
-        assert!((clamp_overlay_height(900.0) - 520.0).abs() < f64::EPSILON);
+        assert!((clamp_overlay_height(900.0) - 760.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -685,44 +681,5 @@ mod tests {
         assert!(!placement.should_auto_position());
         placement.reset();
         assert!(placement.should_auto_position());
-    }
-
-    #[test]
-    fn native_motion_eases_toward_the_latest_overlay_geometry() {
-        let start = OverlayGeometry::new(100, 700, 760, 224);
-        let target = OverlayGeometry::new(900, 300, 760, 480);
-
-        let halfway = interpolate_geometry(start, target, 0.5);
-
-        assert!(halfway.x > 500);
-        assert!(halfway.y < 500);
-        assert!(halfway.height > 352);
-        assert_eq!(interpolate_geometry(start, target, 1.0), target);
-    }
-
-    #[test]
-    fn a_manually_placed_overlay_grows_upward_and_remains_visible() {
-        let screen = ScreenRect::new(0, 0, 1_920, 1_080);
-        let current = OverlayGeometry::new(580, 700, 760, 224);
-
-        let expanded = anchored_resize_geometry(current, 480, screen, 48);
-
-        assert_eq!(expanded, OverlayGeometry::new(580, 444, 760, 480));
-        assert_eq!(expanded.y + i32::try_from(expanded.height).unwrap(), 924);
-    }
-
-    #[test]
-    fn live_content_retargets_keep_the_invocations_destination_screen() {
-        let motion = OverlayMotion::default();
-        let destination = OverlayScreen {
-            rect: ScreenRect::new(-6_400, 1_008, 2_560, 1_440),
-            bottom_margin: 72,
-        };
-
-        motion.remember_screen(destination);
-
-        assert_eq!(motion.target_screen(), Some(destination));
-        motion.clear_screen();
-        assert_eq!(motion.target_screen(), None);
     }
 }

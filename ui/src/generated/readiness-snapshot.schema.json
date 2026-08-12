@@ -1,0 +1,81 @@
+{
+  "$defs": {
+    "DiagnosticCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 80,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9_]+$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "state": {
+          "$ref": "#/$defs/DiagnosticState"
+        },
+        "summary": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "summary"
+      ],
+      "title": "DiagnosticCheck",
+      "type": "object"
+    },
+    "DiagnosticState": {
+      "enum": [
+        "ready",
+        "unverified",
+        "degraded",
+        "blocked"
+      ],
+      "title": "DiagnosticState",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/DiagnosticCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "overall": {
+      "$ref": "#/$defs/DiagnosticState"
+    }
+  },
+  "required": [
+    "overall",
+    "generated_at",
+    "checks"
+  ],
+  "title": "ReadinessSnapshot",
+  "type": "object"
+}

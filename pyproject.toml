@@ -48,12 +48,23 @@ jarvis-core = "jarvis.bootstrap:main"
 
 [project.optional-dependencies]
 speech = [
+    "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2",
     "faster-whisper>=1.2.1",
     "openwakeword>=0.6.0",
     "silero-vad>=6.2.1",
     "sounddevice>=0.5.5",
-    "torch>=2.10,<2.11",
-    "torchaudio>=2.10,<2.11",
+    "torch>=2.11,<2.12",
+    "torchaudio>=2.11,<2.12",
+]
+
+[tool.uv]
+override-dependencies = [
+    "diffusers>=0.39,<0.40",
+    "gradio>=6.20,<7",
+    "safetensors>=0.8,<1",
+    "torch>=2.11,<2.12",
+    "torchaudio>=2.11,<2.12",
+    "transformers>=5.14.1,<6",
 ]
 
 [tool.fastapi]
@@ -61,6 +72,9 @@ entrypoint = "jarvis.bootstrap:create_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jarvis"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers --import-mode=importlib"

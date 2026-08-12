@@ -45,6 +45,12 @@ class SpeechOutputFactory(Protocol):
     ) -> SpeechOutputSession: ...
 
 
+class PlaybackState(Protocol):
+    def begin_playback(self) -> None: ...
+
+    def finish_playback(self) -> None: ...
+
+
 class PhonePcmSink:
     def __init__(
         self,
@@ -74,9 +80,16 @@ class PhonePcmSink:
 
 
 class StreamingSpeechOutput:
-    def __init__(self, *, synthesizer: SpeechSynthesizer, desktop_sink: AudioSink) -> None:
+    def __init__(
+        self,
+        *,
+        synthesizer: SpeechSynthesizer,
+        desktop_sink: AudioSink,
+        desktop_playback_state: PlaybackState | None = None,
+    ) -> None:
         self._synthesizer = synthesizer
         self._desktop_sink = desktop_sink
+        self._desktop_playback_state = desktop_playback_state
 
     def open(
         self,
@@ -85,7 +98,11 @@ class StreamingSpeechOutput:
         send_phone_pcm: Callable[[bytes], Awaitable[None]],
     ) -> SpeechOutputSession:
         sink = self._desktop_sink if device_id == "desktop" else PhonePcmSink(send_phone_pcm)
-        return StreamingSpeechSession(synthesizer=self._synthesizer, sink=sink)
+        return StreamingSpeechSession(
+            synthesizer=self._synthesizer,
+            sink=sink,
+            playback_state=self._desktop_playback_state if device_id == "desktop" else None,
+        )
 
 
 class StreamingSpeechSession:
@@ -98,6 +115,7 @@ class StreamingSpeechSession:
         sink: AudioSink,
         queue_size: int = 8,
         maximum_buffer_characters: int = 1_000,
+        playback_state: PlaybackState | None = None,
     ) -> None:
         if queue_size < 1 or queue_size > 100:
             raise ValueError("speech queue size must be between 1 and 100")
@@ -108,6 +126,8 @@ class StreamingSpeechSession:
         self._clauses: asyncio.Queue[str | None] = asyncio.Queue(maxsize=queue_size)
         self._maximum_buffer_characters = maximum_buffer_characters
         self._buffer = ""
+        self._playback_state = playback_state
+        self._playback_started = False
         self._worker: asyncio.Task[None] | None = None
         self._finished = False
         self.cancelled = False
@@ -162,14 +182,22 @@ class StreamingSpeechSession:
             self._worker = asyncio.create_task(self._run(), name="jarvis-speech-output")
 
     async def _run(self) -> None:
-        while True:
-            clause = await self._clauses.get()
-            if clause is None:
-                return
-            audio = await self._synthesizer.synthesize(clause)
-            if self.cancelled:
-                return
-            await self._sink.play(audio)
+        try:
+            while True:
+                clause = await self._clauses.get()
+                if clause is None:
+                    return
+                audio = await self._synthesizer.synthesize(clause)
+                if self.cancelled:
+                    return
+                if self._playback_state is not None and not self._playback_started:
+                    self._playback_state.begin_playback()
+                    self._playback_started = True
+                await self._sink.play(audio)
+        finally:
+            if self._playback_state is not None and self._playback_started:
+                self._playback_state.finish_playback()
+                self._playback_started = False
 
 
 def _complete_clauses(text: str) -> tuple[list[str], str]:

@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   desktopIdleHideDelay,
+  overlayIsRelocating,
   overlayMotionEnabled,
   phoneConnectionFailureMessage,
+  setOverlayTransitState,
+  shouldFocusDesktopOverlay,
   submitFromComposer,
 } from "./app";
 import { PhoneRequestError, UnpairedPhoneError } from "./phone-auth";
@@ -23,6 +26,30 @@ describe("desktop overlay visibility", () => {
   it("disables native glide motion when Windows requests reduced motion", () => {
     expect(overlayMotionEnabled(() => ({ matches: false }))).toBe(true);
     expect(overlayMotionEnabled(() => ({ matches: true }))).toBe(false);
+  });
+
+  it("exposes native travel as a temporary visual continuity state", () => {
+    const root = { dataset: {} as DOMStringMap };
+
+    setOverlayTransitState(root, "cross-monitor");
+    expect(root.dataset.overlayTransit).toBe("cross-monitor");
+
+    setOverlayTransitState(root, null);
+    expect(root.dataset.overlayTransit).toBeUndefined();
+  });
+
+  it("does not let content fitting interrupt a native relocation", () => {
+    const root = { dataset: {} as DOMStringMap };
+    setOverlayTransitState(root, "local");
+    expect(overlayIsRelocating(root)).toBe(true);
+    setOverlayTransitState(root, null);
+    expect(overlayIsRelocating(root)).toBe(false);
+  });
+
+  it("keeps proactive movement in the background without stealing keyboard focus", () => {
+    expect(shouldFocusDesktopOverlay("conversation")).toBe(true);
+    expect(shouldFocusDesktopOverlay("proactive")).toBe(false);
+    expect(shouldFocusDesktopOverlay(null)).toBe(false);
   });
 });
 

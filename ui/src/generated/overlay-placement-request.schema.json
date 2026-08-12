@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "MonitorLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/Rect"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "work_area": {
+          "$ref": "#/$defs/Rect"
+        }
+      },
+      "required": [
+        "name",
+        "bounds",
+        "work_area"
+      ],
+      "title": "MonitorLayout",
+      "type": "object"
+    },
+    "OverlayGeometry": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Height",
+          "type": "integer"
+        },
+        "left": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Left",
+          "type": "integer"
+        },
+        "top": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Top",
+          "type": "integer"
+        },
+        "visible": {
+          "title": "Visible",
+          "type": "boolean"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "width",
+        "height",
+        "visible"
+      ],
+      "title": "OverlayGeometry",
+      "type": "object"
+    },
+    "PlacementIntent": {
+      "enum": [
+        "conversation",
+        "proactive"
+      ],
+      "title": "PlacementIntent",
+      "type": "string"
+    },
+    "Point": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
+    "Rect": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Height",
+          "type": "integer"
+        },
+        "left": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Left",
+          "type": "integer"
+        },
+        "top": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Top",
+          "type": "integer"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "width",
+        "height"
+      ],
+      "title": "Rect",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "intent": {
+      "$ref": "#/$defs/PlacementIntent"
+    },
+    "monitors": {
+      "items": {
+        "$ref": "#/$defs/MonitorLayout"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Monitors",
+      "type": "array"
+    },
+    "overlay": {
+      "$ref": "#/$defs/OverlayGeometry"
+    },
+    "pointer": {
+      "$ref": "#/$defs/Point"
+    }
+  },
+  "required": [
+    "intent",
+    "overlay",
+    "pointer",
+    "monitors"
+  ],
+  "title": "OverlayPlacementRequest",
+  "type": "object"
+}

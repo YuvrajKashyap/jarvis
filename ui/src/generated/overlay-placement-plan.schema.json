@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "Rect": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Height",
+          "type": "integer"
+        },
+        "left": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Left",
+          "type": "integer"
+        },
+        "top": {
+          "maximum": 131072,
+          "minimum": -131072,
+          "title": "Top",
+          "type": "integer"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "width",
+        "height"
+      ],
+      "title": "Rect",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Anchor"
+    },
+    "density": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Density",
+      "type": "number"
+    },
+    "disposition": {
+      "enum": [
+        "place",
+        "defer"
+      ],
+      "title": "Disposition",
+      "type": "string"
+    },
+    "monitor_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Monitor Name"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/Rect"
+    }
+  },
+  "required": [
+    "disposition",
+    "target",
+    "monitor_name",
+    "anchor",
+    "reason",
+    "density"
+  ],
+  "title": "OverlayPlacementPlan",
+  "type": "object"
+}

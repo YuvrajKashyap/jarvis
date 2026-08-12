@@ -9,10 +9,16 @@ class ModelValue(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ToolCall(ModelValue):
+    name: str
+    arguments: dict[str, JsonValue]
+
+
 class ChatMessage(ModelValue):
     role: Literal["system", "user", "assistant", "tool"]
     content: str
     images: tuple[str, ...] = ()
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class ToolSchema(ModelValue):
@@ -33,11 +39,6 @@ class ModelChunkKind(StrEnum):
     CONTENT = "content"
     TOOL_CALL = "tool_call"
     DONE = "done"
-
-
-class ToolCall(ModelValue):
-    name: str
-    arguments: dict[str, JsonValue]
 
 
 class ModelChunk(ModelValue):

@@ -95,6 +95,21 @@ class OllamaProvider:
                     "role": message.role,
                     "content": message.content,
                     **({"images": list(message.images)} if message.images else {}),
+                    **(
+                        {
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": call.name,
+                                        "arguments": call.arguments,
+                                    }
+                                }
+                                for call in message.tool_calls
+                            ]
+                        }
+                        if message.tool_calls
+                        else {}
+                    ),
                 }
                 for message in request.messages
             ],

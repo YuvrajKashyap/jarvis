@@ -4,6 +4,7 @@ from uuid import UUID
 from jarvis.agency.capabilities import CapabilityContext
 from jarvis.agency.observation import (
     ActiveWindowCapability,
+    LocalTimeCapability,
     ObservationInput,
     SystemHealthCapability,
 )
@@ -66,3 +67,16 @@ async def test_system_health_capability_is_read_only_and_bounded() -> None:
     assert capability.metadata.name == "system.health"
     assert capability.metadata.risk is RiskClass.OBSERVE
     assert result.available_memory_bytes == 4_000_000_000
+
+
+async def test_local_time_capability_returns_an_exact_sourced_time() -> None:
+    instant = datetime(2026, 8, 11, 22, 30, tzinfo=UTC)
+    capability = LocalTimeCapability(
+        timezone_name="America/Chicago",
+        now=lambda: instant,
+    )
+
+    result = await capability.execute(ObservationInput(), CONTEXT)
+
+    assert result.local_datetime.isoformat() == "2026-08-11T17:30:00-05:00"
+    assert result.timezone == "America/Chicago"

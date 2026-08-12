@@ -4,12 +4,18 @@ from uuid import UUID
 import pytest
 
 from jarvis.memory.history import (
+    CONSOLIDATION_VERSION,
     ConversationHistoryRepository,
     ConversationMessage,
     ConversationRole,
     DuplicateConversationMessage,
 )
 from jarvis.platform.sqlite import SQLiteStore
+
+
+def test_current_consolidation_version_reprocesses_history_for_broader_fact_coverage() -> None:
+    assert CONSOLIDATION_VERSION == 2
+
 
 NOW = datetime(2026, 8, 7, 18, 30, tzinfo=UTC)
 SESSION_ID = UUID("019fd977-1d96-7892-950c-6afbb71f7cf0")
@@ -80,6 +86,33 @@ def test_explicit_awareness_transcripts_have_a_distinct_ambient_role(tmp_path) -
     history.append(ambient)
 
     assert history.recent(limit=10) == [ambient]
+
+
+def test_unconsolidated_history_is_claimed_in_stable_chronological_batches(tmp_path) -> None:
+    history = repository(tmp_path)
+    first = message()
+    second = message(
+        message_id=UUID("019fd977-1d96-7892-950c-6afbb71f7cf3"),
+        role=ConversationRole.ASSISTANT,
+        content="You are looking at JARVIS.",
+        created_at=NOW + timedelta(seconds=1),
+    )
+    history.append(first)
+    history.append(second)
+
+    batch = history.unconsolidated(limit=10)
+    assert batch == [first, second]
+
+    history.mark_consolidated(tuple(item.message_id for item in batch))
+
+    assert history.unconsolidated(limit=10) == []
+
+
+def test_mark_consolidated_rejects_unknown_message_ids(tmp_path) -> None:
+    history = repository(tmp_path)
+
+    with pytest.raises(LookupError, match="not found"):
+        history.mark_consolidated((MESSAGE_ID,))
 
 
 @pytest.mark.parametrize("limit", [0, 501])

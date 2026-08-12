@@ -34,6 +34,18 @@ class FakeSink:
         self.cancelled += 1
 
 
+class FakePlaybackState:
+    def __init__(self) -> None:
+        self.started = 0
+        self.finished = 0
+
+    def begin_playback(self) -> None:
+        self.started += 1
+
+    def finish_playback(self) -> None:
+        self.finished += 1
+
+
 @pytest.mark.asyncio
 async def test_streaming_output_speaks_complete_clauses_before_turn_finishes() -> None:
     synthesizer = FakeSynthesizer()
@@ -155,3 +167,48 @@ def test_output_factory_routes_desktop_and_phone_sinks() -> None:
 
     assert isinstance(desktop_session, StreamingSpeechSession)
     assert isinstance(phone_session, StreamingSpeechSession)
+
+
+@pytest.mark.asyncio
+async def test_desktop_output_tracks_real_playback_for_barge_in() -> None:
+    synthesizer = FakeSynthesizer()
+    desktop = FakeSink()
+    playback = FakePlaybackState()
+    output = StreamingSpeechOutput(
+        synthesizer=synthesizer,
+        desktop_sink=desktop,
+        desktop_playback_state=playback,
+    )
+
+    async def send(_pcm: bytes) -> None:
+        return None
+
+    session = output.open(device_id="desktop", send_phone_pcm=send)
+    await session.push("I found the issue.")
+    await session.finish()
+
+    assert playback.started == 1
+    assert playback.finished == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_desktop_output_exits_playback_state() -> None:
+    synthesizer = FakeSynthesizer()
+    synthesizer.block.clear()
+    desktop = FakeSink()
+    playback = FakePlaybackState()
+    output = StreamingSpeechOutput(
+        synthesizer=synthesizer,
+        desktop_sink=desktop,
+        desktop_playback_state=playback,
+    )
+
+    async def send(_pcm: bytes) -> None:
+        return None
+
+    session = output.open(device_id="desktop", send_phone_pcm=send)
+    await session.push("I found the issue.")
+    await asyncio.sleep(0)
+    await session.cancel()
+
+    assert playback.finished == playback.started

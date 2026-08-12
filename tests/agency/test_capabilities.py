@@ -121,6 +121,7 @@ def test_registry_exposes_stable_model_tool_schemas() -> None:
 
     schemas = registry.tool_schemas()
 
+    assert registry.names() == ("files.rename",)
     assert schemas[0].name == "files.rename"
     assert schemas[0].parameters["additionalProperties"] is False
     assert schemas[0].parameters["required"] == ["source", "target"]

@@ -25,6 +25,7 @@ def b64url(value: bytes) -> str:
 
 def test_pairing_secret_is_one_use_and_expires_after_five_minutes() -> None:
     manager = PhonePairing(InMemoryPairingStore())
+    assert manager.paired_device_count() == 0
     private_key = ec.generate_private_key(ec.SECP256R1())
     offer = manager.create_offer(now=NOW)
 
@@ -37,6 +38,7 @@ def test_pairing_secret_is_one_use_and_expires_after_five_minutes() -> None:
     )
 
     assert device.device_id == "yuvraj-iphone"
+    assert manager.paired_device_count() == 1
     with pytest.raises(PairingError, match="already used"):
         manager.complete_pairing(
             pairing_id=offer.pairing_id,
@@ -163,6 +165,7 @@ def test_paired_phone_identity_survives_host_restart(tmp_path: Path) -> None:
     restarted_database = SQLiteStore(database_path)
     restarted_database.initialize()
     restarted = PhonePairing(SQLitePairingStore(restarted_database))
+    assert restarted.paired_device_count() == 1
     challenge = restarted.create_challenge(device_id="yuvraj-iphone", now=NOW)
     signature = private_key.sign(challenge.challenge, ec.ECDSA(challenge.hash_algorithm))
     session = restarted.verify_challenge(

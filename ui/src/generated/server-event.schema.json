@@ -356,6 +356,125 @@
       "title": "ErrorPayload",
       "type": "object"
     },
+    "ProactiveSuggestionEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ProactiveSuggestionPayload"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "proactive_suggestion",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "event_id",
+        "session_id",
+        "turn_id",
+        "sequence",
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "title": "ProactiveSuggestionEvent",
+      "type": "object"
+    },
+    "ProactiveSuggestionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "quiet",
+            "normal",
+            "important"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "proposed_action": {
+          "default": null,
+          "title": "Proposed Action",
+          "type": "null"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "suggested_prompt": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Suggested Prompt",
+          "type": "string"
+        },
+        "suggestion_id": {
+          "format": "uuid",
+          "title": "Suggestion Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "suggestion_id",
+        "title",
+        "message",
+        "reason",
+        "suggested_prompt",
+        "priority",
+        "expires_at"
+      ],
+      "title": "ProactiveSuggestionPayload",
+      "type": "object"
+    },
     "StateChanged": {
       "additionalProperties": false,
       "properties": {
@@ -553,6 +672,7 @@
       "assistant_text": "#/$defs/AssistantText",
       "capability_result": "#/$defs/CapabilityResult",
       "error": "#/$defs/ErrorEvent",
+      "proactive_suggestion": "#/$defs/ProactiveSuggestionEvent",
       "state_changed": "#/$defs/StateChanged",
       "transcript": "#/$defs/Transcript"
     },
@@ -573,6 +693,9 @@
     },
     {
       "$ref": "#/$defs/CapabilityResult"
+    },
+    {
+      "$ref": "#/$defs/ProactiveSuggestionEvent"
     },
     {
       "$ref": "#/$defs/ErrorEvent"

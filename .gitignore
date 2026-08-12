@@ -42,6 +42,8 @@ voice-references/
 recordings/
 transcripts/
 screenshots/
+!docs/assets/
+!docs/assets/*.png
 *.wav
 *.mp3
 *.m4a

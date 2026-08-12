@@ -36,6 +36,11 @@ from jarvis.agency.capabilities import (
     ExecutionStatus,
 )
 from jarvis.agency.policy import ApprovalChoice
+from jarvis.agency.proactivity import (
+    ProactiveSuggestion,
+    ProactivityFeedback,
+    TopicPreference,
+)
 from jarvis.agency.scheduler import ScheduledExecutionEvent
 from jarvis.memory.history import (
     ConversationHistory,
@@ -43,7 +48,8 @@ from jarvis.memory.history import (
     ConversationRole,
 )
 from jarvis.memory.store import MemoryConflict, MemoryFact
-from jarvis.platform.models import ChatMessage
+from jarvis.perception.placement import PlacementPlan, PlacementRequest
+from jarvis.platform.models import ChatMessage, ToolCall
 from jarvis.platform.pairing import AuthenticationError, PairingError, PhonePairing
 from jarvis.platform.protocol import (
     Activate,
@@ -58,6 +64,8 @@ from jarvis.platform.protocol import (
     ErrorPayload,
     Interrupt,
     ModeChange,
+    ProactiveSuggestionEvent,
+    ProactiveSuggestionPayload,
     ServerEvent,
     StateChanged,
     StateChangedPayload,
@@ -78,6 +86,7 @@ from jarvis.runtime.assistant import (
 )
 from jarvis.runtime.awareness import parse_awareness_command
 from jarvis.runtime.conversation import ListeningMode, RuntimeCoordinator, RuntimeSnapshot
+from jarvis.runtime.diagnostics import ReadinessSnapshot
 from jarvis.runtime.lifecycle import ApplicationLifecycle
 from jarvis.runtime.resources import ResourcePressure
 from jarvis.speech.desktop import (
@@ -161,6 +170,17 @@ class CorrectMemoryRequest(BaseModel):
     content: str = Field(min_length=1, max_length=16_000)
 
 
+class ResolveMemoryConflictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+
+
+class MemoryConflictResolutionResponse(BaseModel):
+    accepted: bool
+    fact: MemoryFact | None
+
+
 class MemoryAdministration(Protocol):
     def search(self, query: str, *, limit: int = 12) -> list[MemoryFact]: ...
 
@@ -179,11 +199,52 @@ class MemoryAdministration(Protocol):
 
     def list_conflicts(self) -> list[MemoryConflict]: ...
 
+    def stage_markdown_edits(
+        self,
+        *,
+        source_event_id: UUID,
+        observed_at: datetime,
+    ) -> tuple[MemoryConflict, ...]: ...
+
+    def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        accept: bool,
+        resolved_at: datetime,
+    ) -> MemoryFact | None: ...
+
 
 class ScheduledEventSource(Protocol):
     def subscribe(self) -> AsyncIterator[ScheduledExecutionEvent]: ...
 
     def resolve(self, approval_id: UUID) -> None: ...
+
+
+class ProactiveEventSource(Protocol):
+    def subscribe(self) -> AsyncIterator[ProactiveSuggestion]: ...
+
+    def apply_feedback(
+        self,
+        suggestion_id: UUID,
+        *,
+        feedback: ProactivityFeedback,
+        now: datetime,
+    ) -> TopicPreference: ...
+
+
+class ProactivityFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feedback: ProactivityFeedback
+
+
+class OverlayPlacementPlanner(Protocol):
+    def plan(self, request: PlacementRequest) -> PlacementPlan: ...
+
+
+class ReadinessProvider(Protocol):
+    async def snapshot(self) -> ReadinessSnapshot: ...
 
 
 class StrictRequest(BaseModel):
@@ -255,6 +316,9 @@ def create_app(
     memory: MemoryAdministration | None = None,
     lifecycle: ApplicationLifecycle | None = None,
     scheduled_events: ScheduledEventSource | None = None,
+    proactive_events: ProactiveEventSource | None = None,
+    overlay_placement: OverlayPlacementPlanner | None = None,
+    diagnostics: ReadinessProvider | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -343,9 +407,33 @@ def create_app(
 
     protected = APIRouter(prefix="/v1", dependencies=[Depends(require_token)])
 
+    def require_desktop_token(
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    ) -> None:
+        supplied = (
+            credentials.credentials
+            if credentials is not None and credentials.scheme.lower() == "bearer"
+            else None
+        )
+        expected = settings.desktop_session_token
+        if supplied is None or expected is None or not secrets.compare_digest(supplied, expected):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="desktop authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    desktop = APIRouter(prefix="/v1", dependencies=[Depends(require_desktop_token)])
+
     @protected.get("/state")
     def state() -> RuntimeStateResponse:
         return _state_response(runtime.snapshot())
+
+    @protected.get("/diagnostics")
+    async def readiness_diagnostics() -> ReadinessSnapshot:
+        if diagnostics is None:
+            raise HTTPException(status_code=503, detail="diagnostics are unavailable")
+        return await diagnostics.snapshot()
 
     @protected.get("/history")
     def conversation_history(
@@ -366,6 +454,36 @@ def create_app(
     def memory_conflicts() -> MemoryConflictResponse:
         conflicts = () if memory is None else tuple(memory.list_conflicts())
         return MemoryConflictResponse(conflicts=conflicts)
+
+    @protected.post("/memory/import-markdown")
+    def import_memory_markdown() -> MemoryConflictResponse:
+        if memory is None:
+            raise HTTPException(status_code=503, detail="memory is unavailable")
+        try:
+            conflicts = memory.stage_markdown_edits(
+                source_event_id=uuid4(),
+                observed_at=datetime.now(UTC),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return MemoryConflictResponse(conflicts=conflicts)
+
+    @protected.post("/memory/conflicts/{conflict_id}/resolve")
+    def resolve_memory_conflict(
+        conflict_id: UUID,
+        request: ResolveMemoryConflictRequest,
+    ) -> MemoryConflictResolutionResponse:
+        if memory is None:
+            raise HTTPException(status_code=503, detail="memory is unavailable")
+        try:
+            fact = memory.resolve_conflict(
+                conflict_id,
+                accept=request.accept,
+                resolved_at=datetime.now(UTC),
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail="memory conflict not found") from error
+        return MemoryConflictResolutionResponse(accepted=request.accept, fact=fact)
 
     @protected.patch("/memory/{fact_id}")
     def correct_memory(fact_id: UUID, request: CorrectMemoryRequest) -> MemoryFact:
@@ -390,6 +508,22 @@ def create_app(
         memory.forget(fact_id, forgotten_at=datetime.now(UTC))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @protected.post("/proactivity/{suggestion_id}/feedback")
+    def record_proactivity_feedback(
+        suggestion_id: UUID,
+        request: ProactivityFeedbackRequest,
+    ) -> TopicPreference:
+        if proactive_events is None:
+            raise HTTPException(status_code=503, detail="proactivity is unavailable")
+        try:
+            return proactive_events.apply_feedback(
+                suggestion_id,
+                feedback=request.feedback,
+                now=datetime.now(UTC),
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail="proactive suggestion not found") from error
+
     @protected.post("/pairing/offers", status_code=status.HTTP_201_CREATED)
     def create_pairing_offer() -> PairingOfferResponse:
         offer = phone_pairing.create_offer(now=datetime.now(UTC))
@@ -403,6 +537,12 @@ def create_app(
                 secret=offer.secret,
             ),
         )
+
+    @desktop.post("/overlay/placement")
+    def plan_overlay_placement(request: PlacementRequest) -> PlacementPlan:
+        if overlay_placement is None:
+            raise HTTPException(status_code=503, detail="overlay placement is unavailable")
+        return overlay_placement.plan(request)
 
     @public.post(
         "/pairing/{pairing_id}/complete",
@@ -454,6 +594,7 @@ def create_app(
 
     app.include_router(public)
     app.include_router(protected)
+    app.include_router(desktop)
 
     @app.websocket("/v1/live")
     async def live(websocket: WebSocket) -> None:
@@ -779,6 +920,24 @@ def create_app(
                     )
                 )
 
+        async def pump_proactive_events() -> None:
+            if proactive_events is None:
+                return
+            async for suggestion in proactive_events.subscribe():
+                snapshot = runtime.snapshot()
+                event_session = snapshot.session_id or connection_session
+                event_turn = snapshot.turn_id or connection_turn
+                await emit(
+                    lambda current, item=suggestion, session=event_session, turn=event_turn: (
+                        _proactive_suggestion_event(
+                            session_id=session,
+                            turn_id=turn,
+                            suggestion=item,
+                            sequence=current,
+                        )
+                    )
+                )
+
         await emit(
             lambda current: _state_event(
                 runtime.snapshot(),
@@ -798,6 +957,14 @@ def create_app(
                 name="jarvis-scheduled-events",
             )
             if scheduled_events is not None
+            else None
+        )
+        proactive_event_task = (
+            asyncio.create_task(
+                pump_proactive_events(),
+                name="jarvis-proactive-events",
+            )
+            if proactive_events is not None
             else None
         )
 
@@ -1046,6 +1213,10 @@ def create_app(
                 scheduled_event_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await scheduled_event_task
+            if proactive_event_task is not None:
+                proactive_event_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await proactive_event_task
 
     if settings.ui_directory is not None:
         app.mount(
@@ -1323,7 +1494,7 @@ async def _stream_assistant(
                         hold_approval(
                             approval_prompt.approval_id,
                             client_event,
-                            continuation,
+                            (*continuation, _tool_call_context(event.call)),
                         )
                     await finish_speech()
                     return
@@ -1365,6 +1536,7 @@ async def _stream_assistant(
                     speech=speech,
                     continuation=(
                         *continuation,
+                        _tool_call_context(event.call),
                         _tool_result_context(event.call.name, coordinated.result),
                     ),
                     tool_round=tool_round + 1,
@@ -1680,6 +1852,34 @@ def _scheduled_capability_result_event(
     )
 
 
+def _proactive_suggestion_event(
+    *,
+    session_id: UUID,
+    turn_id: UUID,
+    suggestion: ProactiveSuggestion,
+    sequence: int,
+) -> ProactiveSuggestionEvent:
+    return ProactiveSuggestionEvent(
+        version=1,
+        event_id=uuid4(),
+        session_id=session_id,
+        turn_id=turn_id,
+        sequence=sequence,
+        timestamp=datetime.now(UTC),
+        type="proactive_suggestion",
+        payload=ProactiveSuggestionPayload(
+            suggestion_id=suggestion.suggestion_id,
+            title=suggestion.title,
+            message=suggestion.message,
+            reason=suggestion.reason,
+            suggested_prompt=suggestion.suggested_prompt,
+            priority=suggestion.priority.value,
+            expires_at=suggestion.expires_at,
+            proposed_action=None,
+        ),
+    )
+
+
 def _capability_result_message(result: ExecutionResult, *, fallback: str) -> str:
     if result.reason:
         return result.reason
@@ -1714,3 +1914,7 @@ def _tool_result_context(capability: str, result: ExecutionResult) -> ChatMessag
             sort_keys=True,
         )
     return ChatMessage(role="tool", content=content)
+
+
+def _tool_call_context(call: ToolCall) -> ChatMessage:
+    return ChatMessage(role="assistant", content="", tool_calls=(call,))

@@ -1,9 +1,16 @@
 import json
+from typing import cast
 
 import httpx
 import pytest
 
-from jarvis.platform.models import ChatMessage, GenerationRequest, ModelChunkKind, ToolSchema
+from jarvis.platform.models import (
+    ChatMessage,
+    GenerationRequest,
+    ModelChunkKind,
+    ToolCall,
+    ToolSchema,
+)
 from jarvis.platform.ollama import OllamaProvider
 
 
@@ -123,6 +130,41 @@ async def test_ollama_streams_content_and_tools_but_never_exposes_thinking() -> 
     assert captured["keep_alive"] == -1
     assert captured["think"] is False
     assert captured["options"] == {"num_ctx": 4096}
+
+
+@pytest.mark.asyncio
+async def test_ollama_preserves_the_exact_assistant_tool_call_in_continuations() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            content='{"message":{"role":"assistant","content":"Done."},"done":true}\n',
+        )
+
+    request = GenerationRequest(
+        model="qwen3.5:4b-q4_K_M",
+        messages=(
+            ChatMessage(role="user", content="Check RAM."),
+            ChatMessage(
+                role="assistant",
+                content="",
+                tool_calls=(ToolCall(name="system.health", arguments={}),),
+            ),
+            ChatMessage(role="tool", content='{"memory_percent":72.1}'),
+        ),
+        context_length=4096,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        _chunks = [chunk async for chunk in OllamaProvider(client=client).stream(request)]
+
+    messages = cast(list[dict[str, object]], captured["messages"])
+    assert messages[1] == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"function": {"name": "system.health", "arguments": {}}}],
+    }
 
 
 @pytest.mark.asyncio
