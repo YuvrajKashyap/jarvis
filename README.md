@@ -8,7 +8,7 @@ It is an agentic harness rather than a chatbot tied to one model. JARVIS owns th
 
 > **Current status: paused at the hardware qualification gate.** The system foundation is implemented and the software verification suite passes. Daily use is paused because this laptop's 16 GB of system memory cannot keep the minimum capable local model resident beside a normal workload without unsafe memory pressure. I understand that limit and am looking at better hardware that can host the much more capable JARVIS this design calls for. [STATUS.md](STATUS.md) contains the measurements and continuation plan.
 
-![JARVIS desktop overlay grounded in current screen context](docs/assets/desktop-conversation.png)
+![JARVIS desktop overlay in its ready state](docs/assets/desktop-conversation.png)
 
 ## The outcome
 
@@ -79,20 +79,20 @@ Fine-tuning is for stable behavior and task skill. It is not the storage system 
 
 Every action re-enters a deterministic policy engine immediately before execution. The model can propose work, but it cannot authorize itself, forge approval evidence, or report an action as completed without a capability result.
 
-![JARVIS holding an external action for exact user approval](docs/assets/approval-gate.png)
+![JARVIS external-action approval interface](docs/assets/approval-gate.png)
 
 ### JARVIS can notice what matters
 
-Proactivity is tied to authorized events and personal preferences. JARVIS can watch a build, notice that a permission guarantee regressed, explain why it interrupted, and offer to help. It does not change files or take the next action unless I ask.
+Proactivity is tied to authorized events and personal preferences. Suggestions have dedicated controls for explanation, dismissal, snoozing, feedback, and follow-up. A suggestion does not authorize an action.
 
-![JARVIS noticing a permission regression in a watched build](docs/assets/proactive-assistance.png)
+![JARVIS proactive-assistance interface](docs/assets/proactive-assistance.png)
 
 ### The phone reaches the same JARVIS
 
 The installable iPhone PWA connects privately through Tailscale to the laptop-authoritative runtime. It uses a one-use pairing offer, a non-exportable P-256 device key, signed session challenges, and the same live conversation protocol as the desktop. If the laptop is unreachable, the phone says JARVIS is unavailable instead of substituting another assistant.
 
 <p align="center">
-  <img src="docs/assets/phone-companion.png" width="360" alt="Private JARVIS iPhone companion sharing the desktop conversation state" />
+  <img src="docs/assets/phone-companion.png" width="360" alt="Private JARVIS iPhone companion in its ready state" />
 </p>
 
 ## Architecture
@@ -128,7 +128,7 @@ The infrastructure work is part of the product. The repository includes Windows 
 | Layer | Fresh result |
 | --- | ---: |
 | Python | 308 tests passed |
-| React / TypeScript | 63 tests passed |
+| React / TypeScript | 64 tests passed |
 | Rust / Tauri | 20 tests passed |
 | Python coverage | 86.59% |
 | Formatting, linting, typing, contract drift, builds | Passed |

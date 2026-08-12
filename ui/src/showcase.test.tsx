@@ -1,41 +1,54 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { Showcase, showcaseScenario } from "./showcase";
 
 describe("reproducible interface media", () => {
-  it("shows screen context, personal schedule, and resource policy in one conversation", () => {
-    render(<Showcase scenario="conversation" />);
+  it("renders only the JARVIS surface without a fabricated host application", () => {
+    const { container } = render(<Showcase scenario="conversation" />);
 
     expect(screen.getByLabelText("JARVIS conversation")).toBeVisible();
-    expect(screen.getByText(/Can I leave this running while I head to practice/i)).toBeVisible();
-    expect(screen.getByText(/Tennis starts at 4:30/i)).toBeVisible();
-    expect(screen.getByText(/keep the model unloaded afterward/i)).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Message JARVIS" })).toBeVisible();
+    expect(container.querySelector(".showcase")?.children).toHaveLength(1);
+    expect(container.querySelector(".workbench")).not.toBeInTheDocument();
+    expect(container.querySelector(".mail")).not.toBeInTheDocument();
+    expect(screen.queryByText("evaluate_models.py")).not.toBeInTheDocument();
+    expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument();
   });
 
-  it("shows a restrained proactive suggestion tied to an authorized project watch", () => {
+  it("shows the actual ready conversation surface without a fabricated exchange", () => {
+    const { container } = render(<Showcase scenario="conversation" />);
+    const scope = within(container);
+
+    expect(scope.getByRole("status")).toHaveTextContent("Ready");
+    expect(scope.getByRole("textbox", { name: "Message JARVIS" })).toBeVisible();
+    expect(scope.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
+  });
+
+  it("shows proactivity as an interface preview instead of a fabricated event", () => {
     render(<Showcase scenario="proactivity" />);
 
-    expect(screen.getByText("Permission regression in the latest build")).toBeVisible();
-    expect(screen.getByText("308 passed · 63 passed · 20 passed")).toBeVisible();
-    expect(screen.getByText(/passed on main 27 minutes ago/i)).toBeVisible();
+    expect(screen.getByText("Proactive assistance")).toBeVisible();
+    expect(screen.getByText(/Authorized event suggestions appear here/i)).toBeVisible();
     fireEvent.click(screen.getByText("Why I mentioned it"));
-    expect(screen.getByText(/watch JARVIS builds while you are coding/i)).toBeVisible();
+    expect(
+      screen.getByText(/only appears for events you have allowed JARVIS to monitor/i),
+    ).toBeVisible();
   });
 
-  it("shows the exact external action instead of generic approval copy", () => {
+  it("labels the approval state as a non-operational interface preview", () => {
     render(<Showcase scenario="approval" />);
 
-    expect(screen.getByText(/Send the prepared update to Maya Chen/i)).toBeVisible();
-    expect(screen.queryByText(/recruiter@example.com/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/No message will be sent/i)).toBeVisible();
+    expect(screen.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
   });
 
-  it("continues the same objective on the phone", () => {
-    render(<Showcase scenario="phone" />);
+  it("shows the real empty phone companion state", () => {
+    const { container } = render(<Showcase scenario="phone" />);
+    const scope = within(container);
 
-    expect(screen.getByText(/Picked up from your desktop/i)).toBeVisible();
-    expect(screen.getByText(/24 GB and 32 GB VRAM hosts/i)).toBeVisible();
+    expect(scope.getByRole("button", { name: "Talk to JARVIS" })).toBeVisible();
+    expect(scope.getByText("Keep JARVIS one tap away")).toBeVisible();
+    expect(scope.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
   });
 
   it("parses only known showcase scenarios", () => {

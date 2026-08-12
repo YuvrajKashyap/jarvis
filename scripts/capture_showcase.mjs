@@ -44,7 +44,7 @@ async function capture(browser, scenario, viewport, filename, expandReason = fal
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(`${baseUrl}?scenario=${scenario}`, { waitUntil: "networkidle" });
     if (expandReason) await page.getByText("Why I mentioned it").click();
-    await page.screenshot({ path: resolve(output, filename), fullPage: true });
+    await page.locator(".showcase__surface").screenshot({ path: resolve(output, filename) });
   } finally {
     await page.close();
   }
