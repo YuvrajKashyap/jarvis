@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { Showcase, showcaseScenario } from "./showcase";
 
-describe("recruiter showcase", () => {
+describe("reproducible interface media", () => {
   it("uses the real conversation overlay for the grounded desktop scenario", () => {
     render(<Showcase scenario="conversation" />);
 

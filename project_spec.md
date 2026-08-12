@@ -89,6 +89,18 @@ The architecture should preserve the ability to add optional frontier providers 
 
 Using a local model does not prohibit JARVIS from using authorized internet-connected tools. Web browsing, search, communications, connected services, and other online capabilities are separate from paid frontier-model inference.
 
+### Future Hybrid Intelligence
+
+The approved long-term direction is a model-independent agentic harness that can route work across local, specialized, and optional frontier models without fragmenting JARVIS's identity or conversation.
+
+Local intelligence remains the default for private memory, sensitive context, ambient interaction, routine operation, and offline availability. Optional frontier intelligence may be added when a task materially benefits from it, but only through an approved adapter with explicit privacy, authorization, availability, and cost controls.
+
+The router must consider required capability, modality, sensitivity, latency, resource pressure, availability, and cost. Yuvraj may override routing with instructions such as "keep this local" or "use the strongest model available." The selected model and any transmitted context must remain inspectable.
+
+Automatic routing is not blanket authorization to disclose data. Sensitive information may reach a frontier provider only under a specific approved policy or immediate approval for that context. Provider output remains untrusted input to the same capability, policy, provenance, and audit system used for local models.
+
+JARVIS owns the durable identity, system behavior, memory, permissions, voice, tools, and conversation state. No model provider may become the canonical store for those concerns. A model can be replaced or switched during an objective without creating a different assistant.
+
 ## Voice Identity
 
 JARVIS must have an original, recognizable voice identity created specifically for this JARVIS rather than using a widely shared stock assistant voice.
@@ -124,6 +136,18 @@ More than one model may be stored locally. Only one heavyweight language model m
 Only one heavyweight language model may be loaded at a time. JARVIS must control model residency, context allocation, parallelism, GPU use, system-memory use, temperature, and model switching through a resource governor. A model that cannot meet safe resource limits must not be loaded merely because it can technically execute through heavy paging or CPU offload.
 
 Larger local models that materially damage conversational responsiveness, system stability, or concurrent speech and tool operation do not qualify as more capable JARVIS models for the current hardware.
+
+### Model Adaptation and Personalization
+
+The selected open-weight model is a base model, not the finished JARVIS intelligence. After a base model passes the hardware and quality gates, the project must evaluate JARVIS-specific parameter-efficient adaptation, including LoRA or QLoRA where supported and lawful.
+
+Training data must be curated for stable JARVIS behavior such as tool selection, typed argument construction, multi-step recovery, uncertainty, truthful progress language, interruption, permission discipline, and the approved conversational character. Training assets and outputs must have clear provenance and remain private when they contain personal information.
+
+Every adapted candidate must run against the same permanent evaluation suite as its untouched base model. An adapter must be rejected if it weakens authorization behavior, general reasoning, tool reliability, latency, resource safety, or another minimum gate. Improvement claims require saved comparative evidence.
+
+Fine-tuning must not become the canonical store for changing personal knowledge. Facts, preferences, people, projects, decisions, and unfinished work remain in sourced memory with correction, deletion, export, and conflict handling. Model adaptation targets stable behavior and task skill, while retrieval supplies current personal context.
+
+JARVIS's system identity, model instructions, context assembly, retrieval policy, capability schemas, routing, and voice behavior are also part of the personalization layer. They must remain portable across base models and providers.
 
 ### Speech Pipeline
 

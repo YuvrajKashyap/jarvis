@@ -434,7 +434,7 @@ describe("ConversationOverlay", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows an honest connection state while phone pairing is still in progress", () => {
+  it("shows the actual connection state while phone pairing is still in progress", () => {
     const rendered = render(
       <ConversationOverlay
         surface="phone"

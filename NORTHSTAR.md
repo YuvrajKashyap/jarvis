@@ -6,6 +6,8 @@ JARVIS is one persistent personal intelligence intended to come as close as prac
 
 It is not merely a chatbot, voice assistant, computer agent, model router, or automation system. It is the coherent intelligence above all of those capabilities: one identity, one memory, one personality, one relationship, and one continuously evolving understanding of Yuvraj.
 
+JARVIS is an agentic harness, not a particular language model. Models provide different kinds of intelligence, but JARVIS owns the identity, context, memory, permissions, tools, voice, and continuity that turn those models into one dependable counterpart.
+
 JARVIS is simultaneously:
 
 - An intelligent interface through which Yuvraj can access his models, applications, information, computers, services, and eventually devices and physical environments.
@@ -74,6 +76,28 @@ Yuvraj should be able to call, "Hey JARVIS," wherever he is and reach the same J
 JARVIS should eventually be able to connect Yuvraj's digital and physical environments: his work, communications, information, applications, home, services, sensors, and devices. Underlying models, providers, applications, and integrations should recede into implementation details.
 
 From Yuvraj's perspective, there is only JARVIS.
+
+## One Identity, Many Forms of Intelligence
+
+JARVIS should choose the right intelligence for the situation without making Yuvraj manage models by hand.
+
+Private memory, sensitive context, ambient interaction, routine tasks, and offline work should stay local whenever practical. A stronger local model should be used when the hardware can support it. Specialized models should handle speech, vision, retrieval, coding, or other work when specialization produces a better result. Optional frontier intelligence should be available for work that genuinely exceeds the local system, but only when the task, data policy, authorization, network, and cost allow it.
+
+Routing should consider capability, modality, privacy, latency, resource pressure, availability, and cost. It should be able to switch models during one objective while preserving the same conversation and personality. A model may reason or propose a tool call, but it must never inherit JARVIS's memory store, grant itself authority, or become the source of truth about what happened.
+
+Model choice should usually disappear from the interaction. Yuvraj can still give direct instructions such as "keep this local" or "use the strongest model available," inspect which intelligence was used, and change the decision. Sensitive information must never be sent to a frontier provider because a router decided that a larger model might perform better.
+
+Models will change. Providers will change. JARVIS should improve when they do without losing who it is.
+
+## Deeply Personal by Design
+
+JARVIS should be built around Yuvraj rather than configured as a generic assistant with a different name.
+
+Its memory should reflect Yuvraj's actual life, work, relationships, projects, preferences, decisions, and unfinished objectives. Its capabilities should match the applications, devices, and workflows he uses. Its permission rules, proactive behavior, quiet periods, voice, vocabulary, pronunciation, interface, and conversational manner should all become more useful through deliberate personalization.
+
+The local model should also be treated as a starting point rather than a finished brain. After a capable base model passes the hardware gate, JARVIS should use carefully evaluated fine-tuning, LoRA or QLoRA adapters, prompt and context design, tool-use training, and other lawful model adaptation techniques to improve its fit for JARVIS. Adaptation should target stable behavior, tool reliability, recovery, conversational quality, and the approved personality. It must be measured against the original model and rejected when it causes regressions.
+
+Changing personal facts do not belong in model weights. They belong in sourced, inspectable memory. Personalization must deepen usefulness without making knowledge opaque or turning familiarity into authority.
 
 ## What JARVIS Should Make Possible
 
