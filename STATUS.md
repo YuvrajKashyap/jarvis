@@ -12,7 +12,7 @@ I understand the limits of this machine and am looking at better hardware that c
 
 ## Evidence at the pause point
 
-- `pnpm verify` passed with 308 Python tests, 64 React/TypeScript tests, 20 Rust tests, and 86.59% Python coverage.
+- `pnpm verify` passed with 308 Python tests, 68 React/TypeScript tests, 20 Rust tests, and 86.59% Python coverage.
 - Capability acceptance passed isolated real file write/read/undo, bounded process execution, exact approval binding, rejection, replay denial, destructive-command denial, cancellation, and audit scenarios.
 - Recovery acceptance passed integrity validation, rollback preservation, atomic restoration, and corrupt-source rejection.
 - The latest packaged Python core started independently, exposed authenticated diagnostics, found the packaged speech dependencies, and kept the model unloaded.

@@ -1,18 +1,44 @@
-import { ConversationOverlay, type OverlayView } from "./overlay";
+import { ConversationOverlay, JarvisOrb, type OverlayView } from "./overlay";
 import "./showcase.css";
 
-export type ShowcaseScenario = "conversation" | "proactivity" | "approval" | "phone";
+export type ShowcaseScenario =
+  | "conversation"
+  | "proactivity"
+  | "memory"
+  | "privacy"
+  | "approval"
+  | "phone"
+  | "orb";
 
 const NOOP = () => undefined;
 
 export function showcaseScenario(search: string): ShowcaseScenario {
   const candidate = new URLSearchParams(search).get("scenario");
-  return candidate === "proactivity" || candidate === "approval" || candidate === "phone"
-    ? candidate
+  const scenarios: ShowcaseScenario[] = [
+    "conversation",
+    "proactivity",
+    "memory",
+    "privacy",
+    "approval",
+    "phone",
+    "orb",
+  ];
+  return scenarios.includes(candidate as ShowcaseScenario)
+    ? (candidate as ShowcaseScenario)
     : "conversation";
 }
 
 export function Showcase({ scenario }: { scenario: ShowcaseScenario }) {
+  if (scenario === "orb") {
+    return (
+      <main className="showcase showcase--orb">
+        <div className="showcase__surface showcase__surface--orb">
+          <JarvisOrb mode="resting" onActivate={NOOP} />
+        </div>
+      </main>
+    );
+  }
+
   const phone = scenario === "phone";
   return (
     <main className={`showcase showcase--${scenario}`}>
@@ -39,16 +65,56 @@ export function Showcase({ scenario }: { scenario: ShowcaseScenario }) {
 function scenarioView(scenario: ShowcaseScenario): OverlayView {
   if (scenario === "proactivity") {
     return view({
-      detail: "Suggestion preview",
+      detail: "Example | resource guard",
       suggestion: {
-        id: "suggestion-preview",
-        title: "Proactive assistance",
+        id: "resource-guard-example",
+        title: "The local model crossed its memory limit",
         message:
-          "Authorized event suggestions appear here. JARVIS can explain why it surfaced them before you respond.",
-        reason: "This interface only appears for events you have allowed JARVIS to monitor.",
-        suggestedPrompt: "Tell me more.",
-        priority: "normal",
+          "Available system memory fell below the 1 GiB safety floor while Qwen3.5 4B Q4 was loaded. I unloaded the model before it could pressure the rest of your desktop. No applications were closed.",
+        reason: "You allowed me to watch resource pressure and protect normal desktop headroom.",
+        suggestedPrompt: "Show me the model-load measurements.",
+        actionLabel: "Show measurements",
+        priority: "important",
       },
+    });
+  }
+  if (scenario === "memory") {
+    return view({
+      detail: "Example | sourced memory",
+      transcript: [
+        {
+          id: "memory-user",
+          speaker: "user",
+          text: "What did we learn from the 9B model test?",
+          isFinal: true,
+        },
+        {
+          id: "memory-assistant",
+          speaker: "assistant",
+          text: "It took 87.8 seconds to answer and left about 219 MB of available system memory, so it failed the responsiveness and safety gates on this laptop. The decision was to pause daily use until there is hardware with enough headroom for a stronger resident model.",
+          isFinal: true,
+        },
+      ],
+    });
+  }
+  if (scenario === "privacy") {
+    return view({
+      state: "private",
+      detail: "Rolling buffer off",
+      transcript: [
+        {
+          id: "privacy-user",
+          speaker: "user",
+          text: "Go completely private while I take this call.",
+          isFinal: true,
+        },
+        {
+          id: "privacy-assistant",
+          speaker: "assistant",
+          text: "Private mode is on. Wake-word detection remains available, but the 120-second rolling audio buffer is disabled and nothing from the room will be stored.",
+          isFinal: true,
+        },
+      ],
     });
   }
   if (scenario === "approval") {

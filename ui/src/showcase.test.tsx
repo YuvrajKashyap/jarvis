@@ -24,22 +24,47 @@ describe("reproducible interface media", () => {
     expect(scope.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
   });
 
-  it("shows proactivity as an interface preview instead of a fabricated event", () => {
+  it("shows a useful proactive resource intervention grounded in a measured event", () => {
     render(<Showcase scenario="proactivity" />);
 
-    expect(screen.getByText("Proactive assistance")).toBeVisible();
-    expect(screen.getByText(/Authorized event suggestions appear here/i)).toBeVisible();
+    expect(screen.getByText("The local model crossed its memory limit")).toBeVisible();
+    expect(screen.getByText(/below the 1 GiB safety floor/i)).toBeVisible();
+    expect(screen.getByText(/No applications were closed/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Show measurements" })).toBeVisible();
     fireEvent.click(screen.getByText("Why I mentioned it"));
-    expect(
-      screen.getByText(/only appears for events you have allowed JARVIS to monitor/i),
-    ).toBeVisible();
+    expect(screen.getByText(/protect normal desktop headroom/i)).toBeVisible();
+  });
+
+  it("shows a useful memory example grounded in the measured JARVIS model test", () => {
+    render(<Showcase scenario="memory" />);
+
+    expect(screen.getByText(/What did we learn from the 9B model test/i)).toBeVisible();
+    expect(screen.getByText(/87.8 seconds/i)).toBeVisible();
+    expect(screen.getByText(/219 MB of available system memory/i)).toBeVisible();
+  });
+
+  it("shows a useful private-mode example with the audio behavior made explicit", () => {
+    const rendered = render(<Showcase scenario="privacy" />);
+    const scope = within(rendered.container);
+
+    expect(scope.getByRole("status")).toHaveTextContent("Private mode");
+    expect(scope.getByText(/Go completely private while I take this call/i)).toBeVisible();
+    expect(scope.getByText(/rolling audio buffer is disabled/i)).toBeVisible();
+  });
+
+  it("shows the reusable resting orb without an overlay shell", () => {
+    const { container } = render(<Showcase scenario="orb" />);
+
+    expect(screen.getByRole("button", { name: "Open JARVIS" })).toBeVisible();
+    expect(container.querySelector(".overlay")).not.toBeInTheDocument();
   });
 
   it("labels the approval state as a non-operational interface preview", () => {
-    render(<Showcase scenario="approval" />);
+    const rendered = render(<Showcase scenario="approval" />);
+    const scope = within(rendered.container);
 
-    expect(screen.getByText(/No message will be sent/i)).toBeVisible();
-    expect(screen.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
+    expect(scope.getByText(/No message will be sent/i)).toBeVisible();
+    expect(scope.queryByRole("list", { name: "Conversation transcript" })).not.toBeInTheDocument();
   });
 
   it("shows the real empty phone companion state", () => {
@@ -53,6 +78,9 @@ describe("reproducible interface media", () => {
 
   it("parses only known showcase scenarios", () => {
     expect(showcaseScenario("?scenario=proactivity")).toBe("proactivity");
+    expect(showcaseScenario("?scenario=memory")).toBe("memory");
+    expect(showcaseScenario("?scenario=privacy")).toBe("privacy");
+    expect(showcaseScenario("?scenario=orb")).toBe("orb");
     expect(showcaseScenario("?scenario=phone")).toBe("phone");
     expect(showcaseScenario("?scenario=unknown")).toBe("conversation");
   });

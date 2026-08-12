@@ -36,6 +36,7 @@ export type OverlayView = {
     message: string;
     reason: string;
     suggestedPrompt: string;
+    actionLabel?: string;
     priority: "quiet" | "normal" | "important";
   } | null;
   detail: string | null;
@@ -63,6 +64,40 @@ type ConversationOverlayProps = {
   onPairPhone?: () => void;
   onClosePairing?: () => void;
 };
+
+type JarvisOrbProps =
+  | { mode: "resting"; onActivate: () => void }
+  | { mode: "transit"; onActivate?: never };
+
+export function JarvisOrb(props: JarvisOrbProps) {
+  const layers = (
+    <>
+      <span className="transit-orb__wake" />
+      <span className="transit-orb__orbit transit-orb__orbit--outer" />
+      <span className="transit-orb__orbit transit-orb__orbit--inner" />
+      <span className="transit-orb__core" />
+    </>
+  );
+
+  if (props.mode === "resting") {
+    return (
+      <button
+        className="resting-orb"
+        type="button"
+        aria-label="Open JARVIS"
+        onClick={props.onActivate}
+      >
+        {layers}
+      </button>
+    );
+  }
+
+  return (
+    <div className="transit-orb" aria-hidden="true">
+      {layers}
+    </div>
+  );
+}
 
 export function ConversationOverlay(_props: ConversationOverlayProps) {
   const {
@@ -298,7 +333,7 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
                   onSubmit(view.suggestion?.suggestedPrompt ?? "");
                 }}
               >
-                Talk it through
+                {view.suggestion.actionLabel ?? "Talk it through"}
               </button>
             </div>
           </section>
@@ -379,14 +414,7 @@ export function ConversationOverlay(_props: ConversationOverlayProps) {
           </button>
         ) : null}
       </div>
-      {surface === "desktop" ? (
-        <div className="transit-orb" aria-hidden="true">
-          <span className="transit-orb__wake" />
-          <span className="transit-orb__orbit transit-orb__orbit--outer" />
-          <span className="transit-orb__orbit transit-orb__orbit--inner" />
-          <span className="transit-orb__core" />
-        </div>
-      ) : null}
+      {surface === "desktop" ? <JarvisOrb mode="transit" /> : null}
     </section>
   );
 }

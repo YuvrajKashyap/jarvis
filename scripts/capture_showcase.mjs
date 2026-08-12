@@ -29,8 +29,11 @@ try {
   try {
     await capture(browser, "conversation", { width: 1280, height: 720 }, "desktop-conversation.png");
     await capture(browser, "proactivity", { width: 1280, height: 720 }, "proactive-assistance.png", true);
+    await capture(browser, "memory", { width: 1280, height: 720 }, "memory-continuity.png");
+    await capture(browser, "privacy", { width: 1280, height: 720 }, "private-mode.png");
     await capture(browser, "approval", { width: 1280, height: 720 }, "approval-gate.png");
     await capture(browser, "phone", { width: 430, height: 860 }, "phone-companion.png");
+    await capture(browser, "orb", { width: 400, height: 400 }, "resting-orb.png");
   } finally {
     await browser.close();
   }

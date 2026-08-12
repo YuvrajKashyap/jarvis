@@ -83,9 +83,29 @@ Every action re-enters a deterministic policy engine immediately before executio
 
 ### JARVIS can notice what matters
 
-Proactivity is tied to authorized events and personal preferences. Suggestions have dedicated controls for explanation, dismissal, snoozing, feedback, and follow-up. A suggestion does not authorize an action.
+Proactivity is tied to authorized events and personal preferences. The example below uses the measured 4B model test from this project. JARVIS protects the desktop memory floor, reports the intervention, confirms that no applications were closed, and offers the underlying measurements. Suggestions have dedicated controls for explanation, dismissal, snoozing, feedback, and follow-up. A suggestion does not authorize a new action.
 
 ![JARVIS proactive-assistance interface](docs/assets/proactive-assistance.png)
+
+### Memory carries decisions forward
+
+JARVIS should answer from sourced history instead of making me reconstruct old decisions. This example uses the measured 9B model result from this project and recalls both the finding and the decision that followed it.
+
+![JARVIS recalling the measured local-model decision](docs/assets/memory-continuity.png)
+
+### Private mode is explicit
+
+When I ask JARVIS to go completely private, the rolling room-audio buffer is disabled and the interface confirms exactly what remains active and what will not be stored.
+
+![JARVIS confirming private mode and disabled ambient buffering](docs/assets/private-mode.png)
+
+### Present without taking over the screen
+
+JARVIS does not need a full conversation panel when there is nothing to show. The compact orb keeps the interface available without covering the current work. The same visual component is used while the overlay relocates, which keeps the transition coherent instead of making the interface disappear and reappear.
+
+<p align="center">
+  <img src="docs/assets/resting-orb.png" width="180" alt="JARVIS resting orb interface state" />
+</p>
 
 ### The phone reaches the same JARVIS
 
@@ -128,7 +148,7 @@ The infrastructure work is part of the product. The repository includes Windows 
 | Layer | Fresh result |
 | --- | ---: |
 | Python | 308 tests passed |
-| React / TypeScript | 64 tests passed |
+| React / TypeScript | 68 tests passed |
 | Rust / Tauri | 20 tests passed |
 | Python coverage | 86.59% |
 | Formatting, linting, typing, contract drift, builds | Passed |

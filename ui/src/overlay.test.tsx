@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ConversationOverlay, type OverlayView } from "./overlay";
+import { ConversationOverlay, JarvisOrb, type OverlayView } from "./overlay";
 
 function view(overrides: Partial<OverlayView> = {}): OverlayView {
   return {
@@ -17,6 +17,18 @@ function view(overrides: Partial<OverlayView> = {}): OverlayView {
 }
 
 describe("ConversationOverlay", () => {
+  it("uses the same orb component for a resting activation control and hidden transit state", () => {
+    const onActivate = vi.fn();
+    const { rerender } = render(<JarvisOrb mode="resting" onActivate={onActivate} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open JARVIS" }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+
+    rerender(<JarvisOrb mode="transit" />);
+    expect(screen.queryByRole("button", { name: "Open JARVIS" })).not.toBeInTheDocument();
+    expect(document.querySelector(".transit-orb")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("plainly surfaces blocked and unverified product readiness", () => {
     const rendered = render(
       <ConversationOverlay

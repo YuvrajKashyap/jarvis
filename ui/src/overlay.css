@@ -104,6 +104,31 @@ button {
     transform 180ms var(--ease-out);
 }
 
+.resting-orb {
+  position: relative;
+  width: 96px;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  filter: drop-shadow(0 0 22px rgba(121, 175, 200, 0.42));
+  transition:
+    filter 180ms ease-out,
+    transform 180ms var(--ease-out);
+}
+
+.resting-orb:hover {
+  filter: drop-shadow(0 0 30px rgba(121, 175, 200, 0.56));
+  transform: scale(1.04);
+}
+
+.resting-orb:focus-visible {
+  outline: 2px solid var(--ion-bright);
+  outline-offset: 8px;
+}
+
 .transit-orb__core,
 .transit-orb__orbit,
 .transit-orb__wake {
@@ -149,6 +174,10 @@ button {
   inset: 42% 72% 42% -62%;
   background: linear-gradient(90deg, transparent, rgba(121, 175, 200, 0.28));
   filter: blur(3px);
+}
+
+.resting-orb .transit-orb__wake {
+  display: none;
 }
 
 html[data-overlay-transit="local"],
@@ -883,6 +912,10 @@ html[data-overlay-transit="cross-monitor"] .transit-orb {
   .button,
   .interrupt,
   .drag-handle {
+    transition: none;
+  }
+
+  .resting-orb {
     transition: none;
   }
 }
